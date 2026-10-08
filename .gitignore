@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build artifacts / logs
+*.log
+.pnpm-store/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local install state (never commit profile linkage)
+package.json.bak

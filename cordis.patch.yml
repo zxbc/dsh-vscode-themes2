@@ -1,0 +1,3 @@
+- insert:
+    - id: vscode-themes2
+      name: '@local/dsh-vscode-themes2'
