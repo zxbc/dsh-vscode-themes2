@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "./index.js",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./marketplace.js": "./marketplace.js"
   },
-  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "files": ["index.js", "client.js", "marketplace.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
   "dependencies": {},
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",
-      "immediately": true,
       "inject": ["@deepseek-ai/dsh-client-ui-theme"]
     }
   }

@@ -4,8 +4,45 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
-    // Curated VS Code themes pre-mapped to DSH tokens (built at authoring time).
-    const THEMES = [
+    // Marketplace bridge: the host exposes `search` and `fetchTheme` as a Typert
+    // Remote service (namespace `vscodeThemes`). We mount a strict codec for each
+    // method so the gateway validates our inputs and the results pass through as
+    // plain JSON. `create()` only needs to return `{ parse }` — the registry does
+    // not require a zod instance for hand-written contributions — so we use a
+    // pass-through schema and avoid importing zod into the client bundle.
+    const PKG = '@local/dsh-vscode-themes2';
+    const PASS_THROUGH = { parse: (v) => v };
+    const codec = (typeSymbol) => ({ mode: 'strict', typeSymbol, create: () => PASS_THROUGH });
+    const MARKETPLACE_CONTRIBUTION = {
+      package: PKG,
+      descriptors: [
+        {
+          id: PKG + '#vscodeThemes/search',
+          service: 'vscodeThemes',
+          namespace: 'vscodeThemes',
+          method: 'search',
+          invocation: { kind: 'direct' },
+          parameters: [
+            { name: 'query', wire: 'query', source: 'json', codec: codec(PKG + '#vscodeThemes/search:query') },
+          ],
+          result: codec(PKG + '#vscodeThemes/search:result'),
+        },
+        {
+          id: PKG + '#vscodeThemes/fetchTheme',
+          service: 'vscodeThemes',
+          namespace: 'vscodeThemes',
+          method: 'fetchTheme',
+          invocation: { kind: 'direct' },
+          parameters: [
+            { name: 'ext', wire: 'ext', source: 'json', codec: codec(PKG + '#vscodeThemes/fetchTheme:ext') },
+          ],
+          result: codec(PKG + '#vscodeThemes/fetchTheme:result'),
+        },
+      ],
+    };
+
+    // Curated VS Code themes pre-mapped to DSW tokens (built at authoring time).
+    const BUNDLED_THEMES = [
   {
     "id": "vscode-zhuangtongfa-material-theme",
     "name": "One Dark Pro",
@@ -316,16 +353,65 @@ window.__ModuleLoader__.load({
   }
 ];
 
+
+    function themeId(ext) {
+      return 'vscode-' + String(ext.publisher).toLowerCase() + '-' + String(ext.name).toLowerCase();
+    }
+
+
+    // ------------------------------------------------------------------
+    // Persistence of user-installed marketplace themes
+    // ------------------------------------------------------------------
+    const INSTALLED_KEY = 'dsh.vscodeThemes.installed';
+
+    function loadInstalled() {
+      try {
+        const raw = localStorage.getItem(INSTALLED_KEY);
+        if (!raw) return [];
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) return [];
+        return list
+          .filter((x) => x && x.id && x.tokens)
+          .sort((a, b) => (b.installedAt || 0) - (a.installedAt || 0));
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveInstalled(list) {
+      try {
+        localStorage.setItem(INSTALLED_KEY, JSON.stringify(list));
+      } catch (err) {
+        console.error('vscode-themes saveInstalled failed', err);
+      }
+    }
+
     const NS = 'vscode-themes';
     const ENTRY_ID = 'vscode-themes';
 
+    // Marketplace search pacing: the input is uncontrolled and polled once a
+    // second; a search fires only when the value changed since the last tick.
+    // Queries shorter than 2 characters are never sent (the marketplace
+    // answers single-letter searches with 401) — a hint is shown instead.
+    const MARKET_POLL_MS = 1000;
+    const MARKET_MIN_QUERY_LEN = 2;
+
     return {
-      inject: ['slots', 'theme', 'locale'],
-      apply(ctx) {
+      // Note: we deliberately do NOT declare `remote.vscodeThemes` in inject.
+      // A plugin parks on unresolvable injects and only runs `apply` once every
+      // inject resolves — but this plugin's own `apply` is what mounts the
+      // namespace, so declaring it would deadlock activation. The namespace is
+      // therefore resolved per call with `ctx.get('remote.vscodeThemes')`.
+      inject: ['slots', 'theme', 'locale', 'timer', 'remote'],
+      async apply(ctx) {
+        // Hold the locale disposer so a re-activation (e.g. the `remote` host
+        // service toggling during a settings-page sync) disposes the prior
+        // registration before `apply` runs again. Without this, the second
+        // `locale.register` throws "namespace already has locale".
+        let localeDisposer = null;
         const t = ctx.locale.bind(NS);
 
-        // Register locale strings for this plugin's UI.
-        ctx.locale.register(NS, 'en', {
+        localeDisposer = ctx.locale.register(NS, 'en', {
           'section.title': 'VS Code Themes',
           'search.placeholder': 'Search themes…',
           'applied': 'Applied',
@@ -334,32 +420,55 @@ window.__ModuleLoader__.load({
           'count': '{n} themes',
           'scheme.dark': 'dark',
           'scheme.light': 'light',
+          'market.search.placeholder': 'Search the VS Code Marketplace…',
+          'market.section': 'Marketplace results',
+          'market.empty': 'Search to discover themes from the VS Code Marketplace.',
+          'market.busy': 'Searching…',
+          'market.mountError': 'Marketplace search is unavailable right now.',
+          'market.install': 'Install',
+          'market.installing': 'Fetching…',
+          'market.error': 'Could not fetch this theme.',
+          'market.minChars': 'Type at least 2 characters to search.',
         });
 
-        const STORAGE_KEY = 'dsh.vscodeThemes.selected';
-        let selectedId = '';
-        try { selectedId = localStorage.getItem(STORAGE_KEY) || ''; } catch (_) {}
-
-        // Register every bundled theme with the theme runtime.
         const themeDisposers = [];
-        for (const theme of THEMES) {
+        const registeredIds = new Set();
+
+        function registerTheme(theme) {
+          if (registeredIds.has(theme.id)) return;
           try {
-            themeDisposers.push(
-              ctx.theme.register({
-                id: theme.id,
-                colorScheme: theme.colorScheme,
-                tokens: theme.tokens,
-              }),
-            );
+            const d = ctx.theme.register({ id: theme.id, colorScheme: theme.colorScheme, tokens: theme.tokens });
+            themeDisposers.push(d);
+            registeredIds.add(theme.id);
           } catch (err) {
+            registeredIds.add(theme.id);
             console.error('vscode-themes register failed', theme.id, err);
           }
         }
 
-        // Apply the persisted selection (if any) for this session.
-        if (selectedId && THEMES.some((th) => th.id === selectedId)) {
-          ctx.theme.setTheme(selectedId);
+        let installed = loadInstalled();
+        for (const theme of BUNDLED_THEMES) registerTheme(theme);
+        for (const theme of installed) registerTheme(theme);
+
+        const STORAGE_KEY = 'dsh.vscodeThemes.selected';
+        let selectedId = '';
+        try { selectedId = localStorage.getItem(STORAGE_KEY) || ''; } catch (_) {}
+        if (selectedId && registeredIds.has(selectedId)) {
+          try { ctx.theme.setTheme(selectedId); } catch (_) {}
         }
+
+        // Mount the marketplace Remote service defensively. If the mount fails
+        // (e.g. host service missing) we degrade to bundled-only themes instead
+        // of breaking the whole section; `marketMountError` surfaces the reason.
+        let unmountMarketplace = null;
+        let marketplaceError = '';
+        try {
+          unmountMarketplace = await ctx.remote.$mount(MARKETPLACE_CONTRIBUTION);
+        } catch (err) {
+          marketplaceError = String(err && err.message || err);
+        }
+        const marketAvailable = unmountMarketplace !== null;
+        const marketMountError = marketplaceError;
 
         function persistSelected(id) {
           try {
@@ -370,24 +479,223 @@ window.__ModuleLoader__.load({
           }
         }
 
-        function ThemeBrowser(props) {
+        function ThemeBrowser() {
           const [query, setQuery] = React.useState('');
           const [selected, setSelected] = React.useState(selectedId);
+          const [installedList, setInstalledList] = React.useState(installed);
+
+          // Marketplace state (only active when the Remote mount succeeded).
+          const [marketQuery, setMarketQuery] = React.useState('');
+          const [marketResults, setMarketResults] = React.useState([]);
+          const [marketBusy, setMarketBusy] = React.useState(false);
+          const [marketError, setMarketError] = React.useState(marketMountError);
+          const [marketShort, setMarketShort] = React.useState(false);
+          const [pendingIds, setPendingIds] = React.useState(new Set());
+          const fetchedCache = React.useRef(Object.create(null));
+          const marketInputRef = React.useRef(null);
+          const marketSeenRef = React.useRef('');
+          const searchTokenRef = React.useRef(0);
+
+          async function runSearch(mq) {
+            // Token invalidates any in-flight search when a newer one starts.
+            const token = ++searchTokenRef.current;
+            setMarketQuery(mq);
+            setMarketShort(false);
+            setMarketBusy(true);
+            setMarketError('');
+            try {
+              // `ctx.get` resolves the mounted namespace tree-wide; a direct
+              // `ctx.remote.vscodeThemes` read would throw "without inject".
+              const ns = ctx.get('remote.vscodeThemes');
+              if (!ns) throw new Error('marketplace namespace is not mounted');
+              const res = await ns.search(mq);
+              if (token !== searchTokenRef.current) return;
+              if (!res.ok) throw res.error;
+              const themes = (res.value || []).map((e) => ({
+                id: 'vscode-' + String(e.publisher).toLowerCase() + '-' + String(e.name).toLowerCase(),
+                publisher: e.publisher,
+                name: e.name,
+                displayName: e.displayName,
+                version: e.version,
+                description: e.description,
+              }));
+              setMarketResults(themes);
+            } catch (err) {
+              if (token === searchTokenRef.current) setMarketError(String(err && err.message || err));
+            } finally {
+              if (token === searchTokenRef.current) setMarketBusy(false);
+            }
+          }
+
+          // The marketplace input is uncontrolled: typing never re-renders the
+          // section. A timer polls the field once a second and only reacts
+          // when the trimmed value changed since the last tick.
+          React.useEffect(() => {
+            if (!marketAvailable) return undefined;
+            const id = setInterval(() => {
+              const input = marketInputRef.current;
+              if (!input) return;
+              const raw = input.value.trim();
+              if (raw === marketSeenRef.current) return;
+              marketSeenRef.current = raw;
+              searchTokenRef.current += 1; // cancel any in-flight search
+              if (!raw) {
+                setMarketQuery('');
+                setMarketShort(false);
+                setMarketResults([]);
+                setMarketBusy(false);
+                setMarketError(marketMountError);
+                return;
+              }
+              if (raw.length < MARKET_MIN_QUERY_LEN) {
+                // The marketplace rejects single-letter queries with 401; show
+                // a gentle hint instead of firing the request.
+                setMarketQuery(raw);
+                setMarketShort(true);
+                setMarketResults([]);
+                setMarketBusy(false);
+                setMarketError('');
+                return;
+              }
+              runSearch(raw);
+            }, MARKET_POLL_MS);
+            return () => clearInterval(id);
+          }, [marketAvailable]);
 
           const q = query.trim().toLowerCase();
-          const filtered = q
-            ? THEMES.filter((th) => th.name.toLowerCase().indexOf(q) !== -1)
-            : THEMES;
+
+          // Local list: installed (most recent first) then bundled, filtered by query.
+          const installedIds = new Set(installedList.map((x) => x.id));
+          const localThemes = [
+            ...installedList,
+            ...BUNDLED_THEMES.filter((b) => !installedIds.has(b.id)),
+          ].filter((th) => !q || th.name.toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1);
 
           function selectTheme(id) {
             if (id === selected) return;
+            const th = localThemes.find((x) => x.id === id);
+            if (th) registerTheme(th);
             ctx.theme.setTheme(id);
             setSelected(id);
             persistSelected(id);
           }
 
+          // Fetch a marketplace theme's full definition (tokens), cached so
+          // preview and install never double-fetch.
+          async function getDef(theme) {
+            if (fetchedCache.current[theme.id]) return fetchedCache.current[theme.id];
+            const ns = ctx.get('remote.vscodeThemes');
+            if (!ns) throw new Error('marketplace namespace is not mounted');
+            const res = await ns.fetchTheme({
+              publisher: theme.publisher,
+              name: theme.name,
+              version: theme.version,
+            });
+            if (!res.ok) throw res.error;
+            fetchedCache.current[theme.id] = res.value;
+            return res.value;
+          }
+
+          // Clicking a marketplace card previews (applies) the theme once.
+          async function previewTheme(theme) {
+            if (installedIds.has(theme.id)) {
+              selectTheme(theme.id);
+              return;
+            }
+            setPendingIds((prev) => new Set(prev).add(theme.id));
+            try {
+              const def = await getDef(theme);
+              registerTheme(def);
+              ctx.theme.setTheme(def.id);
+              setSelected(def.id);
+              persistSelected(def.id);
+            } catch (err) {
+              setMarketError(String(err && err.message || err));
+            } finally {
+              setPendingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(theme.id);
+                return next;
+              });
+            }
+          }
+
+          // Installing persists the fetched definition to localStorage and adds
+          // it to the front of the installed list (most-recent-first).
+          async function installTheme(theme) {
+            if (installedIds.has(theme.id)) return;
+            setPendingIds((prev) => new Set(prev).add(theme.id));
+            try {
+              const def = await getDef(theme);
+              const list = installedList.filter((x) => x.id !== def.id);
+              list.unshift({ ...def, installedAt: Date.now() });
+              saveInstalled(list);
+              registerTheme(def);
+              setInstalledList(list);
+            } catch (err) {
+              setMarketError(String(err && err.message || err));
+            } finally {
+              setPendingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(theme.id);
+                return next;
+              });
+            }
+          }
+
+          function marketCard(theme) {
+            const isSelected = theme.id === selected;
+            const isInstalled = installedIds.has(theme.id);
+            const isPending = pendingIds.has(theme.id);
+            return h(
+              'div',
+              {
+                key: theme.id,
+                className: 'vst-card' + (isSelected ? ' selected' : '') + (isPending ? ' is-disabled' : ''),
+                role: 'button',
+                'aria-pressed': isSelected,
+                onClick: () => previewTheme(theme),
+              },
+              h(
+                'div',
+                { className: 'vst-card-top' },
+                h('span', { className: 'vst-name' }, theme.displayName || theme.name),
+                h(
+                  'span',
+                  { className: 'vst-badges' },
+                  h('span', { key: 'market', className: 'vst-badge vst-badge-market' }, 'marketplace'),
+                  isInstalled ? h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')) : null,
+                ),
+              ),
+              theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
+              h(
+                'div',
+                { className: 'vst-card-actions' },
+                h(
+                  'span',
+                  { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
+                  isPending ? t('market.installing') : isSelected ? t('applied') : t('apply'),
+                ),
+                !isInstalled
+                  ? h(
+                      'button',
+                      {
+                        className: 'vst-install-btn',
+                        disabled: isPending,
+                        onClick: (e) => {
+                          e.stopPropagation();
+                          installTheme(theme);
+                        },
+                      },
+                      t('market.install'),
+                    )
+                  : null,
+              ),
+            );
+          }
+
           function previewStrip(theme) {
-            const tk = theme.tokens;
+            const tk = theme.tokens || {};
             const colors = [
               tk['--dsw-alias-bg-base'],
               tk['--dsw-alias-brand-primary'],
@@ -400,7 +708,49 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'vst-preview', 'aria-hidden': true },
               colors.map((c, i) =>
-                h('span', { key: i, className: 'vst-swatch', style: { background: c } }),
+                h('span', { key: i, className: 'vst-swatch' + (c ? '' : ' is-empty'), style: c ? { background: c } : {} }),
+              ),
+            );
+          }
+
+          function badges(theme, kind) {
+            const list = [];
+            if (theme.colorScheme) {
+              list.push(h('span', { key: 'scheme', className: 'vst-badge' }, t('scheme.' + theme.colorScheme)));
+            }
+            if (kind === 'installed') {
+              list.push(h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')));
+            }
+            return list;
+          }
+
+          function card(theme, kind) {
+            const isSelected = theme.id === selected;
+            return h(
+              'div',
+              {
+                key: theme.id,
+                className: 'vst-card' + (isSelected ? ' selected' : ''),
+                role: 'button',
+                'aria-pressed': isSelected,
+                onClick: () => selectTheme(theme.id),
+              },
+              h(
+                'div',
+                { className: 'vst-card-top' },
+                h('span', { className: 'vst-name' }, theme.name || theme.displayName),
+                h('span', { className: 'vst-badges' }, badges(theme, kind)),
+              ),
+              previewStrip(theme),
+              theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
+              h(
+                'div',
+                { className: 'vst-card-actions' },
+                h(
+                  'span',
+                  { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
+                  isSelected ? t('applied') : t('apply'),
+                ),
               ),
             );
           }
@@ -415,25 +765,49 @@ window.__ModuleLoader__.load({
                   '.vst-header{display:flex;flex-direction:column;gap:4px;}' +
                   '.vst-title{margin:0;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary);}' +
                   '.vst-subtitle{margin:0;font-size:13px;color:var(--dsw-alias-label-secondary);}' +
-                  '.vst-search{width:100%;max-width:420px;box-sizing:border-box;padding:8px 12px;font-size:14px;' +
+                  '.vst-search{width:100%;max-width:520px;box-sizing:border-box;padding:8px 12px;font-size:14px;' +
                   'color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);' +
                   'border:1px solid var(--dsw-alias-border-l1);border-radius:8px;outline:none;}' +
                   '.vst-search:focus{border-color:var(--dsw-alias-brand-primary);}' +
-                  '.vst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}' +
-                  '.vst-card{display:flex;flex-direction:column;gap:8px;padding:14px;cursor:pointer;text-align:left;' +
+                  '.vst-error{padding:10px 14px;font-size:13px;border-radius:8px;' +
+                  'color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);' +
+                  'border:1px solid var(--dsw-alias-state-error-primary);}' +
+                  '.vst-section{display:flex;flex-direction:column;gap:10px;}' +
+                  '.vst-section-title{margin:0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;' +
+                  'color:var(--dsw-alias-label-secondary);}' +
+                  '.vst-market{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:16px;}' +
+                  '.vst-market-body{display:flex;flex-direction:column;gap:10px;}' +
+                  '.vst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}' +
+                  '.vst-card{display:flex;flex-direction:column;gap:8px;padding:14px;text-align:left;' +
                   'background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;' +
                   'color:var(--dsw-alias-label-primary);font:inherit;transition:border-color .12s,transform .06s;}' +
-                  '.vst-card:hover{border-color:var(--dsw-alias-brand-primary);}' +
-                  '.vst-card:active{transform:scale(.99);}' +
+                  '.vst-card[role="button"]{cursor:pointer;}' +
+                  '.vst-card[role="button"]:hover{border-color:var(--dsw-alias-brand-primary);}' +
+                  '.vst-card[role="button"]:active{transform:scale(.99);}' +
                   '.vst-card.selected{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary);}' +
-                  '.vst-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}' +
+                  '.vst-card.is-disabled{opacity:.6;}' +
+                  '.vst-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
                   '.vst-name{font-size:14px;font-weight:600;}' +
-                  '.vst-badge{font-size:11px;padding:2px 8px;border-radius:999px;' +
+                  '.vst-badges{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}' +
+                  '.vst-badge{font-size:10px;padding:2px 7px;border-radius:999px;' +
                   'background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);}' +
+                  '.vst-badge-installed{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary);}' +
+                  '.vst-badge-market{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);}' +
+                  '.vst-badge-ni{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary);}' +
                   '.vst-preview{display:flex;gap:4px;height:18px;border-radius:6px;overflow:hidden;}' +
                   '.vst-swatch{flex:1;display:block;}' +
+                  '.vst-swatch.is-empty{background:var(--dsw-alias-bg-layer-2);}' +
+                  '.vst-desc{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);' +
+                  'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}' +
+                  '.vst-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}' +
                   '.vst-state{font-size:12px;color:var(--dsw-alias-label-secondary);}' +
                   '.vst-state.is-selected{color:var(--dsw-alias-brand-primary);font-weight:600;}' +
+                  '.vst-state-error{color:var(--dsw-alias-state-error-primary);}' +
+                  '.vst-install-btn{font:inherit;font-size:12px;font-weight:600;padding:4px 12px;cursor:pointer;' +
+                  'color:var(--dsw-alias-bg-base);background:var(--dsw-alias-brand-primary);' +
+                  'border:1px solid var(--dsw-alias-brand-primary);border-radius:6px;}' +
+                  '.vst-install-btn:hover{filter:brightness(1.1);}' +
+                  '.vst-install-btn.is-disabled{opacity:.5;cursor:default;filter:none;}' +
                   '.vst-empty{padding:32px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:14px;}',
               },
             }),
@@ -441,7 +815,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'vst-header' },
               h('h2', { className: 'vst-title' }, t('section.title')),
-              h('p', { className: 'vst-subtitle' }, t('count', { n: THEMES.length })),
+              h('p', { className: 'vst-subtitle' }, t('count', { n: localThemes.length })),
             ),
             h('input', {
               className: 'vst-search',
@@ -450,41 +824,41 @@ window.__ModuleLoader__.load({
               value: query,
               onChange: (e) => setQuery(e.target.value),
             }),
-            filtered.length === 0
-              ? h('div', { className: 'vst-empty' }, t('no.results'))
-              : h(
-                  'div',
-                  { className: 'vst-grid' },
-                  filtered.map((theme) => {
-                    const isSelected = theme.id === selected;
-                    return h(
-                      'button',
-                      {
-                        key: theme.id,
-                        type: 'button',
-                        className: 'vst-card' + (isSelected ? ' selected' : ''),
-                        onClick: () => selectTheme(theme.id),
-                        'aria-pressed': isSelected,
-                      },
-                      h(
-                        'div',
-                        { className: 'vst-card-top' },
-                        h('span', { className: 'vst-name' }, theme.name),
-                        h(
-                          'span',
-                          { className: 'vst-badge' },
-                          t('scheme.' + theme.colorScheme),
-                        ),
-                      ),
-                      previewStrip(theme),
-                      h(
-                        'span',
-                        { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
-                        isSelected ? t('applied') : t('apply'),
-                      ),
-                    );
-                  }),
-                ),
+            h(
+              'div',
+              { className: 'vst-section' },
+              localThemes.length === 0
+                ? h('div', { className: 'vst-empty' }, t('no.results'))
+                : h('div', { className: 'vst-grid' }, localThemes.map((theme) => card(theme, installedIds.has(theme.id) ? 'installed' : 'bundled'))),
+            ),
+            h(
+              'div',
+              { className: 'vst-market' },
+              h('h3', { className: 'vst-section-title' }, t('market.section')),
+              marketAvailable
+                ? h(
+                    'div',
+                    { className: 'vst-market-body' },
+                    h('input', {
+                      className: 'vst-search',
+                      type: 'search',
+                      placeholder: t('market.search.placeholder'),
+                      defaultValue: '',
+                      ref: marketInputRef,
+                    }),
+                    marketBusy ? h('p', { className: 'vst-state' }, t('market.busy')) : null,
+                    !marketBusy && marketShort ? h('p', { className: 'vst-state' }, t('market.minChars')) : null,
+                    !marketBusy && !marketShort && marketError ? h('div', { className: 'vst-error' }, marketError) : null,
+                    !marketBusy && !marketShort && !marketError && !marketQuery
+                      ? h('div', { className: 'vst-empty' }, t('market.empty'))
+                      : null,
+                    !marketBusy && !marketShort && !marketError && !!marketQuery && marketResults.length === 0
+                      ? h('div', { className: 'vst-empty' }, t('no.results'))
+                      : null,
+                    marketResults.length ? h('div', { className: 'vst-grid' }, marketResults.map((theme) => marketCard(theme))) : null,
+                  )
+                : h('div', { className: 'vst-error' }, t('market.mountError')),
+            ),
           );
         }
 
@@ -495,9 +869,18 @@ window.__ModuleLoader__.load({
           ),
         );
 
-        return () => {
+        return async () => {
+          if (localeDisposer) {
+            try { localeDisposer(); } catch (err) { /* ignore */ }
+            localeDisposer = null;
+          }
           for (const d of themeDisposers) {
             try { d(); } catch (err) { /* ignore */ }
+          }
+          try {
+            if (unmountMarketplace) await unmountMarketplace();
+          } catch (err) {
+            /* ignore */
           }
         };
       },
