@@ -5,9 +5,11 @@ A VS Code theme switcher plugin for the DeepSeek Harness (DSH) Web UI.
 process.** Update this file at the end of every working session so future sessions
 can resume from here.
 
-## Current status — 2026-10-09
+## Current status — 2026-10-10
 
-**State: FULLY WORKING — user-confirmed.**
+**State: FULLY WORKING — four fixes added (persistence + remove, marketplace card
+samples, applied-theme persistence across refresh, rendered theme samples instead of
+flat swatches). Local changes only; NOT pushed to remote.**
 
 - Marketplace search: uncontrolled input polled every 1 s with change detection —
   no per-keystroke queries.
@@ -19,16 +21,74 @@ can resume from here.
 - Preview of both bundled and installed marketplace themes works.
 - Verified themes: 6 Tokyo-Night-family + 4 light themes all convert with 14 tokens.
 
-**Known deferred refinement:** marketplace (not-yet-fetched) theme cards don't show
-a color swatch until the theme is fetched; installed/bundled cards already do.
+**FIX 1 — persistence + remove (2026-10-10).** Installed themes now survive a
+refresh AND closing/reopening the settings page. Root cause was that
+`installedList` initialized from the `installed` closure variable captured once at
+`apply()` time (stale after an install). Both `installedList` and the new
+`removedIds` now use lazy `useState(() => …)` initializers that re-read
+`localStorage` on every mount. A new **Remove** (×) button on every card removes a
+bundled or installed theme (persisted to `dsh.vscodeThemes.removed`); removing the
+applied theme auto-falls-back to the first available one. Re-installing a removed
+theme un-removes it.
+
+**FIX 2 — marketplace card swatches (2026-10-10).** Marketplace (not-yet-fetched)
+theme cards now show a live color-swatch preview. A `useEffect` eagerly fetches each
+search result's `.vsix` definition in the background (3 at a time, de-duplicated via
+`marketFetchedRef` + the existing `fetchedCache`), storing the token sets in
+`marketTokens`; each card renders `previewStrip(def)` once available, a subtle
+shimmer strip until then. The `fetchedCache` fallback in `marketCard` covers the
+cancelled-fetch edge case.
+
+**FIX 3 — applied theme persists across refresh (2026-10-10).** The applied theme
+reverted to the default DSH theme on refresh even though the selection was saved.
+Root cause: `ThemeRuntime.adopt()` re-runs when the DSH settings scope loads
+asynchronously AFTER boot and overwrites our `setTheme(selectedId)` with the
+built-in preference — and a custom id can never persist there (`setTheme(id)` writes
+the scope only when `id` is `light`/`dark`/`system`; the scope's `preference` field
+schema is a union of those three). Fix = a grace-window re-assertion: poll
+`ctx.theme.getTheme().active.id` every 200 ms for a 6 s window; whenever the resolved
+theme is not ours (`activeId !== currentSelected` and the id is registered) re-assert
+`setTheme(currentSelected)`, then stop. `currentSelected` is a mutable var updated by
+`persistSelected()` BEFORE the caller applies, so a user's own switch is never fought
+(all four switch functions were reordered to persist-before-setTheme). Polling was
+chosen over `ctx.on('theme/change')` because cross-plugin event-bus sharing is not
+guaranteed for our context. The timer is cleared on dispose. After the window the DSH
+appearance controls work again. The applied indicator was also strengthened to
+`✓ Applied` on both card kinds.
+
+**FIX 4 — rendered theme samples replace flat swatches (2026-10-10).** The 6-flat-
+swatch strip was too literal. `previewStrip` was replaced by `themeSample(theme)`, a
+mini DSH chat mock rendered in the theme's ACTUAL colors: a brand-dot header with the
+theme name + scheme badge, a user message bubble in the brand color (auto-contrast
+text), an assistant bubble in the layer color with primary + secondary text, a primary
+button, and success/warn/error chips tinted via `withAlpha`, plus an input field.
+Every color is bound with an inline `style` to the target theme's real tokens — a
+`.vst-*` class would resolve `var(--dsw-alias-*)` to the currently-applied theme, not
+the card's theme, so inline binding is mandatory. Pure color helpers `parseRGB` /
+`contrastOn` / `withAlpha` handle hex3/6/8, rgb()/rgba() and alpha composition. The
+existing background `getDef`/`marketTokens`/prefetch is reused, so marketplace cards
+also get rendered samples (shimmer until fetched). Both `card()` and `marketCard()`
+call `themeSample` now.
 
 ## Architecture (two halves, one plugin identity)
 
 - **`client.js`** (browser half, object form `{inject, apply(ctx)}`) — renders the
-  settings section: search box, bundled + installed theme cards (swatch preview,
-  badges, apply), "From VS Code Marketplace" section with Install buttons. Persists
-  `dsh.vscodeThemes.selected` and `dsh.vscodeThemes.installed` in `localStorage`.
-  Registers themes with `ctx.theme.register` on demand.
+  settings section: search box, bundled + installed theme cards (rendered `themeSample`
+  preview, badges, apply, Remove ×, `✓ Applied` indicator), "From VS Code Marketplace"
+  section with Install buttons. Every card shows a mini DSH chat mock rendered in the
+  theme's actual colors via inline `style` bound to its tokens (user bubble in brand,
+  assistant bubble in layer color, primary/secondary text, primary button,
+  success/warn/error chips, input field) — a `.vst-*` class would resolve
+  `var(--dsw-alias-*)` to the applied theme, not the card's theme, so inline binding is
+  mandatory. Marketplace result cards get a rendered sample from a background `useEffect`
+  that fetches each result's `.vsix` definition (3 concurrent; shimmer until fetched).
+  A 6 s grace-window re-assertion makes the applied custom theme survive a refresh
+  (see FIX 3). Persists
+  `dsh.vscodeThemes.selected`, `dsh.vscodeThemes.installed`, and
+  `dsh.vscodeThemes.removed` in `localStorage`; `installedList`/`removedIds` use lazy
+  `useState(() => …)` initializers so they re-read localStorage on every mount (this
+  is what makes installed/removed themes survive a refresh and a settings-page
+  remount). Registers themes with `ctx.theme.register` on demand.
 - **`index.js`** (host half) — `VscodeThemes extends TypertRemoteService`
   (`super(ctx, "vscodeThemes")`), `@Remote search(query)` and `@Remote fetchTheme(ext)`
   delegating to the pure logic module. The `@Remote` decorator is applied the same
@@ -123,6 +183,27 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-10 (later)** — Implemented two more fixes (local only, NOT pushed): (3)
+  applied-theme persistence across refresh — grace-window (6 s / 200 ms tick)
+  re-assertion of `setTheme(currentSelected)` to defeat the async `ThemeRuntime.adopt()`
+  override, with `persistSelected` updating `currentSelected` before each apply so a
+  user's own switch is never fought, and a stronger `✓ Applied` indicator; (4) rendered
+  theme samples replacing the flat swatch strip — `themeSample(theme)` renders a mini
+  DSH chat mock in the theme's actual colors via inline `style` token binding, with pure
+  `parseRGB`/`contrastOn`/`withAlpha` helpers; marketplace cards reuse the existing
+  background prefetch. Verified: `node --check` on all files, 19/19 color-helper unit
+  tests, `themeSample` render assertions (all inline-style bindings + empty-token
+  fallback), old `previewStrip`/`.vst-swatch` symbols gone.
+- **2026-10-10** — Implemented two fixes (local only, NOT pushed): (1) persistence +
+  remove — fixed the stale-closure bug (`installedList`/`removedIds` now use lazy
+  `useState(() => …)` initializers re-reading localStorage on every mount) and added
+  a Remove (×) button + `dsh.vscodeThemes.removed` persistence with applied-theme
+  fall-back and re-install un-remove; (2) marketplace card swatches — a `useEffect`
+  eagerly fetches each result's `.vsix` definition in the background (3 concurrent,
+  de-duplicated) and each card renders a live `previewStrip` from the fetched tokens
+  (shimmer until ready). Verified: `node --check` on all files, host imports, all new
+  symbols present in the SHIPPED live client bundle (rev a91b282168fc), old
+  stale-closure pattern gone, entry enabled (`disabled: false`).
 - **2026-10-09** — Full session: wired the marketplace through a correct
   `TypertRemoteService` host half + client self-mount; fixed the
   "cannot get property without inject" deadlock (self-mount contract), the TDZ crash,
