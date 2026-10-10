@@ -9,7 +9,8 @@ can resume from here.
 
 **State: FULLY WORKING — four fixes added (persistence + remove, marketplace card
 samples, applied-theme persistence across refresh, rendered theme samples instead of
-flat swatches). Local changes only; NOT pushed to remote.**
+flat swatches). Pushed to remote (commit 94cc366) and the repo is PUBLIC:
+https://github.com/zxbc/dsh-vscode-themes2.**
 
 - Marketplace search: uncontrolled input polled every 1 s with change detection —
   no per-keystroke queries.
@@ -183,7 +184,14 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
-- **2026-10-10 (later)** — Implemented two more fixes (local only, NOT pushed): (3)
+- **2026-10-10 (final)** — On user request (lifting the no-push constraint): committed
+  the two fixes as `94cc366`, pushed to `origin/main`, and made the repo PUBLIC via the
+  GitHub API (`PATCH /repos/… {"private":false}`). Now live at
+  https://github.com/zxbc/dsh-vscode-themes2 (unauthenticated access returns 200).
+  Auth used the existing PAT stored by the git `store` credential helper; `gh` CLI was
+  not installed, so the visibility flip went through `curl` against the REST API.
+- **2026-10-10 (later)** — Implemented two more fixes (local only, NOT pushed at the
+  time; pushed in the (final) entry above): (3)
   applied-theme persistence across refresh — grace-window (6 s / 200 ms tick)
   re-assertion of `setTheme(currentSelected)` to defeat the async `ThemeRuntime.adopt()`
   override, with `persistSelected` updating `currentSelected` before each apply so a
