@@ -4,6 +4,59 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    // ---- color helpers for the rendered theme sample (pure, no React) -------
+    // Parse a CSS color into [r, g, b] (0–255) or null. Handles #rgb, #rrggbb,
+    // #rrggbbaa, rgb() and rgba(). Used to derive legible contrast text + tints.
+    function parseRGB(color) {
+      if (!color) return null;
+      const s = String(color).trim();
+      if (s[0] === '#') {
+        let hex = s.slice(1);
+        if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+        if (hex.length < 6) return null;
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        if ([r, g, b].some((v) => Number.isNaN(v))) return null;
+        return [r, g, b];
+      }
+      const m = s.match(/rgba?\(\s*(\d+)\s*[\s,]+\s*(\d+)\s*[\s,]+\s*(\d+)/);
+      if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+      return null;
+    }
+    // Pick legible text color (near-black or white) for a given background.
+    function contrastOn(color) {
+      const rgb = parseRGB(color);
+      if (!rgb) return '#ffffff';
+      const [r, g, b] = rgb;
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.62 ? '#111318' : '#ffffff';
+    }
+    // Return `color` with an explicit alpha (hex → 8-digit, rgb → rgba).
+    function withAlpha(color, alpha) {
+      if (!color) return 'transparent';
+      const s = String(color).trim();
+      const a = Math.max(0, Math.min(1, alpha));
+      const aa = Math.round(a * 255).toString(16).padStart(2, '0');
+      if (s[0] === '#') {
+        let hex = s.slice(1);
+        if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+        if (hex.length < 6) return s;
+        return '#' + hex.slice(0, 6) + aa;
+      }
+      if (s.startsWith('rgba(')) {
+        const parts = s.slice(5, -1).split(',');
+        parts[3] = String(a);
+        return 'rgba(' + parts.join(',') + ')';
+      }
+      if (s.startsWith('rgb(')) {
+        const parts = s.slice(4, -1).split(',');
+        parts.push(String(a));
+        return 'rgba(' + parts.join(',') + ')';
+      }
+      return s;
+    }
+
     // Marketplace bridge: the host exposes `search` and `fetchTheme` as a Typert
     // Remote service (namespace `vscodeThemes`). We mount a strict codec for each
     // method so the gateway validates our inputs and the results pass through as
@@ -386,6 +439,33 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ------------------------------------------------------------------
+    // Persistence of themes the user has removed (bundled or installed).
+    // Removing a theme filters it out of the list so the user can debloat
+    // both the installed set and the bundled set.
+    // ------------------------------------------------------------------
+    const REMOVED_KEY = 'dsh.vscodeThemes.removed';
+
+    function loadRemoved() {
+      try {
+        const raw = localStorage.getItem(REMOVED_KEY);
+        if (!raw) return [];
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) return [];
+        return list.filter((x) => typeof x === 'string' && x);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveRemoved(list) {
+      try {
+        localStorage.setItem(REMOVED_KEY, JSON.stringify(list));
+      } catch (err) {
+        console.error('vscode-themes saveRemoved failed', err);
+      }
+    }
+
     const NS = 'vscode-themes';
     const ENTRY_ID = 'vscode-themes';
 
@@ -429,6 +509,7 @@ window.__ModuleLoader__.load({
           'market.installing': 'Fetching…',
           'market.error': 'Could not fetch this theme.',
           'market.minChars': 'Type at least 2 characters to search.',
+          'remove': 'Remove this theme',
         });
 
         const themeDisposers = [];
@@ -451,11 +532,45 @@ window.__ModuleLoader__.load({
         for (const theme of installed) registerTheme(theme);
 
         const STORAGE_KEY = 'dsh.vscodeThemes.selected';
+        // Tracks the latest persisted selection so the boot-race re-assertion
+        // below never fights a user-initiated switch. Updated by persistSelected.
+        let currentSelected = '';
         let selectedId = '';
         try { selectedId = localStorage.getItem(STORAGE_KEY) || ''; } catch (_) {}
         if (selectedId && registeredIds.has(selectedId)) {
           try { ctx.theme.setTheme(selectedId); } catch (_) {}
         }
+        currentSelected = selectedId;
+
+        // The theme service adopts its persisted built-in preference
+        // (light/dark/system) from the settings scope asynchronously AFTER boot,
+        // which reverts a custom selection — and a custom id never persists there
+        // (the scope's `preference` field only accepts light/dark/system, and
+        // setTheme() writes that scope only for built-in ids). So we make the
+        // selection stick by re-asserting it, for a short grace window, whenever
+        // the resolved theme is not ours. We poll the live snapshot (a
+        // cross-plugin `theme/change` listener is not guaranteed to reach our
+        // context) and compare against the LATEST selection so a user switch is
+        // never fought. After the window the DSH appearance controls work again.
+        const REASSERT_WINDOW_MS = 6000;
+        const REASSERT_TICK_MS = 200;
+        const reassertStarted = Date.now();
+        const reassertTimer = setInterval(() => {
+          if (Date.now() - reassertStarted >= REASSERT_WINDOW_MS) {
+            clearInterval(reassertTimer);
+            return;
+          }
+          const want = currentSelected;
+          if (!want || !registeredIds.has(want)) return;
+          let activeId = null;
+          try {
+            const snap = ctx.theme.getTheme && ctx.theme.getTheme();
+            activeId = snap && snap.active && snap.active.id;
+          } catch (_) { /* theme service not ready yet */ }
+          if (activeId && activeId !== want) {
+            try { ctx.theme.setTheme(want); } catch (_) {}
+          }
+        }, REASSERT_TICK_MS);
 
         // Mount the marketplace Remote service defensively. If the mount fails
         // (e.g. host service missing) we degrade to bundled-only themes instead
@@ -471,6 +586,9 @@ window.__ModuleLoader__.load({
         const marketMountError = marketplaceError;
 
         function persistSelected(id) {
+          // Update the re-assertion tracker FIRST, before the caller applies the
+          // theme, so the boot-race re-assertion never reverts a fresh switch.
+          currentSelected = id || '';
           try {
             if (id) localStorage.setItem(STORAGE_KEY, id);
             else localStorage.removeItem(STORAGE_KEY);
@@ -482,7 +600,12 @@ window.__ModuleLoader__.load({
         function ThemeBrowser() {
           const [query, setQuery] = React.useState('');
           const [selected, setSelected] = React.useState(selectedId);
-          const [installedList, setInstalledList] = React.useState(installed);
+          // Re-read localStorage on EVERY mount (lazy initializer). The `installed`
+          // closure variable is captured once at apply() time and is stale after an
+          // install — initializing from it is why installed themes vanished when the
+          // settings section was closed and reopened.
+          const [installedList, setInstalledList] = React.useState(() => loadInstalled());
+          const [removedIds, setRemovedIds] = React.useState(() => new Set(loadRemoved()));
 
           // Marketplace state (only active when the Remote mount succeeded).
           const [marketQuery, setMarketQuery] = React.useState('');
@@ -491,6 +614,10 @@ window.__ModuleLoader__.load({
           const [marketError, setMarketError] = React.useState(marketMountError);
           const [marketShort, setMarketShort] = React.useState(false);
           const [pendingIds, setPendingIds] = React.useState(new Set());
+          // Fetched token sets for marketplace results, keyed by theme id — used to
+          // render a live color-swatch preview on each marketplace card.
+          const [marketTokens, setMarketTokens] = React.useState(Object.create(null));
+          const marketFetchedRef = React.useRef(Object.create(null));
           const fetchedCache = React.useRef(Object.create(null));
           const marketInputRef = React.useRef(null);
           const marketSeenRef = React.useRef('');
@@ -562,22 +689,64 @@ window.__ModuleLoader__.load({
             return () => clearInterval(id);
           }, [marketAvailable]);
 
+          // Eagerly fetch each marketplace result's theme definition in the
+          // background so its card can show a live color-swatch preview — the
+          // user gets a rough sense of each theme's palette at a glance without
+          // having to click (apply) every theme. Fetches run 3 at a time and are
+          // de-duplicated via marketFetchedRef + the getDef cache, so re-searches
+          // and overlapping result sets never double-download.
+          React.useEffect(() => {
+            if (!marketAvailable) return undefined;
+            if (!marketResults.length) return undefined;
+            let cancelled = false;
+            (async () => {
+              const queue = marketResults.slice();
+              const workers = Array.from({ length: 3 }, async () => {
+                while (queue.length) {
+                  const theme = queue.shift();
+                  if (!theme || cancelled) break;
+                  if (marketFetchedRef.current[theme.id]) continue;
+                  marketFetchedRef.current[theme.id] = true; // mark in-flight
+                  try {
+                    const def = await getDef(theme);
+                    if (cancelled) break;
+                    setMarketTokens((prev) => (prev[theme.id] ? prev : { ...prev, [theme.id]: def }));
+                  } catch (_) {
+                    // Incompatible / unavailable theme: allow a later retry and
+                    // the card simply shows no preview.
+                    marketFetchedRef.current[theme.id] = null;
+                  }
+                }
+              });
+              await Promise.all(workers);
+            })();
+            return () => { cancelled = true; };
+          }, [marketResults, marketAvailable]);
+
           const q = query.trim().toLowerCase();
 
-          // Local list: installed (most recent first) then bundled, filtered by query.
+          // Effective local list: installed (most recent first) then bundled, with
+          // any removed themes filtered out, then filtered by the search query.
           const installedIds = new Set(installedList.map((x) => x.id));
+          const seenIds = new Set();
           const localThemes = [
             ...installedList,
             ...BUNDLED_THEMES.filter((b) => !installedIds.has(b.id)),
-          ].filter((th) => !q || th.name.toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1);
+          ].filter((th) => {
+            if (removedIds.has(th.id) || seenIds.has(th.id)) return false;
+            seenIds.add(th.id);
+            return !q || th.name.toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
+          });
 
           function selectTheme(id) {
             if (id === selected) return;
             const th = localThemes.find((x) => x.id === id);
             if (th) registerTheme(th);
-            ctx.theme.setTheme(id);
-            setSelected(id);
+            // Persist before applying so the boot-race re-assertion sees the
+            // new value and never reverts the switch we just made.
             persistSelected(id);
+            try { ctx.theme.setTheme(id); } catch (_) {}
+            setSelected(id);
           }
 
           // Fetch a marketplace theme's full definition (tokens), cached so
@@ -606,9 +775,11 @@ window.__ModuleLoader__.load({
             try {
               const def = await getDef(theme);
               registerTheme(def);
-              ctx.theme.setTheme(def.id);
-              setSelected(def.id);
+              // Persist before applying so the boot-race re-assertion sees the
+              // new value and never reverts the switch we just made.
               persistSelected(def.id);
+              try { ctx.theme.setTheme(def.id); } catch (_) {}
+              setSelected(def.id);
             } catch (err) {
               setMarketError(String(err && err.message || err));
             } finally {
@@ -621,9 +792,10 @@ window.__ModuleLoader__.load({
           }
 
           // Installing persists the fetched definition to localStorage and adds
-          // it to the front of the installed list (most-recent-first).
+          // it to the front of the installed list (most-recent-first). Installing
+          // a theme the user previously removed un-removes it so it shows again.
           async function installTheme(theme) {
-            if (installedIds.has(theme.id)) return;
+            if (installedIds.has(theme.id) && !removedIds.has(theme.id)) return;
             setPendingIds((prev) => new Set(prev).add(theme.id));
             try {
               const def = await getDef(theme);
@@ -632,6 +804,12 @@ window.__ModuleLoader__.load({
               saveInstalled(list);
               registerTheme(def);
               setInstalledList(list);
+              if (removedIds.has(def.id)) {
+                const nextRemoved = new Set(removedIds);
+                nextRemoved.delete(def.id);
+                saveRemoved([...nextRemoved]);
+                setRemovedIds(nextRemoved);
+              }
             } catch (err) {
               setMarketError(String(err && err.message || err));
             } finally {
@@ -643,10 +821,36 @@ window.__ModuleLoader__.load({
             }
           }
 
+          // Removing a theme filters it out of the list — works for both bundled
+          // and installed themes, giving the user a way to debloat either set. For
+          // installed themes the stored definition is dropped too, keeping
+          // localStorage lean. If the applied theme is removed the selection falls
+          // back to the first still-available theme.
+          function removeTheme(id) {
+            const nextRemoved = new Set(removedIds);
+            nextRemoved.add(id);
+            saveRemoved([...nextRemoved]);
+            setRemovedIds(nextRemoved);
+            const nextInstalled = installedList.filter((x) => x.id !== id);
+            if (nextInstalled.length !== installedList.length) {
+              saveInstalled(nextInstalled);
+              setInstalledList(nextInstalled);
+            }
+            if (id === selected) {
+              const fallback = localThemes.find((th) => th.id !== id);
+              if (fallback) {
+                persistSelected(fallback.id);
+                try { ctx.theme.setTheme(fallback.id); } catch (_) {}
+                setSelected(fallback.id);
+              }
+            }
+          }
+
           function marketCard(theme) {
             const isSelected = theme.id === selected;
             const isInstalled = installedIds.has(theme.id);
             const isPending = pendingIds.has(theme.id);
+            const def = marketTokens[theme.id] || fetchedCache.current[theme.id] || null;
             return h(
               'div',
               {
@@ -667,6 +871,16 @@ window.__ModuleLoader__.load({
                   isInstalled ? h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')) : null,
                 ),
               ),
+              // Rendered sample of the theme in its actual colors. Filled in
+              // the definition is fetched in the background; a loading shimmer
+              // strip until then.
+              def
+                ? themeSample(def)
+                : h(
+                    'div',
+                    { className: 'vst-sample vst-sample-loading', 'aria-hidden': true },
+                    h('span', { className: 'vst-sample-shimmer' }),
+                  ),
               theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
               h(
                 'div',
@@ -674,7 +888,7 @@ window.__ModuleLoader__.load({
                 h(
                   'span',
                   { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
-                  isPending ? t('market.installing') : isSelected ? t('applied') : t('apply'),
+                  isPending ? t('market.installing') : isSelected ? '✓ ' + t('applied') : t('apply'),
                 ),
                 !isInstalled
                   ? h(
@@ -689,26 +903,61 @@ window.__ModuleLoader__.load({
                       },
                       t('market.install'),
                     )
-                  : null,
+                  : removeButton(theme.id),
               ),
             );
           }
 
-          function previewStrip(theme) {
+          // A miniature DSH-style UI rendered in the theme's ACTUAL colors, so
+          // the card shows what the theme really looks like rather than a flat
+          // swatch strip. Every color is bound via inline `style` to the target
+          // theme's tokens — a `.vst-*` class would resolve `var(--dsw-alias-*)`
+          // to the currently-applied theme, not this card's theme.
+          function themeSample(theme) {
             const tk = theme.tokens || {};
-            const colors = [
-              tk['--dsw-alias-bg-base'],
-              tk['--dsw-alias-brand-primary'],
-              tk['--dsw-alias-label-primary'],
-              tk['--dsw-alias-state-success-primary'],
-              tk['--dsw-alias-state-warn-primary'],
-              tk['--dsw-alias-state-error-primary'],
-            ];
+            const bg = tk['--dsw-alias-bg-base'] || '#14151a';
+            const layer = tk['--dsw-alias-bg-layer-1'] || bg;
+            const label = tk['--dsw-alias-label-primary'] || '#e8e8ec';
+            const label2 = tk['--dsw-alias-label-secondary'] || label;
+            const brand = tk['--dsw-alias-brand-primary'] || '#4d78cc';
+            const success = tk['--dsw-alias-state-success-primary'] || '#109868';
+            const warn = tk['--dsw-alias-state-warn-primary'] || '#d19a66';
+            const error = tk['--dsw-alias-state-error-primary'] || '#c24038';
+            const border = tk['--dsw-alias-border-l2'] || tk['--dsw-alias-border-l1'] || '#3a3f4b';
+            const onBrand = contrastOn(brand);
+            const name = (theme.displayName || theme.name || theme.id || 'Theme').slice(0, 28);
             return h(
               'div',
-              { className: 'vst-preview', 'aria-hidden': true },
-              colors.map((c, i) =>
-                h('span', { key: i, className: 'vst-swatch' + (c ? '' : ' is-empty'), style: c ? { background: c } : {} }),
+              { className: 'vst-sample', 'aria-hidden': true, style: { background: bg, borderColor: border } },
+              // header: brand dot + theme name + scheme badge
+              h(
+                'div',
+                { className: 'vst-sample-head' },
+                h('span', { className: 'vst-sample-dot', style: { background: brand } }),
+                h('span', { className: 'vst-sample-name', style: { color: label } }, name),
+                h('span', { className: 'vst-sample-badge', style: { color: label2, borderColor: border } }, theme.colorScheme || 'theme'),
+              ),
+              // user message bubble (brand background, right-aligned)
+              h('div', { className: 'vst-sample-msg vst-sample-user', style: { background: brand, color: onBrand } }, 'How does it look?'),
+              // assistant bubble (layer background) with primary + secondary text,
+              // a primary button, and success/warn/error chips
+              h(
+                'div',
+                { className: 'vst-sample-msg vst-sample-ai', style: { background: layer, borderColor: border } },
+                h('div', { className: 'vst-sample-body' },
+                  h('span', { style: { color: label } }, 'Here it is, '),
+                  h('span', { style: { color: label2 } }, 'in your colors.'),
+                ),
+                h('div', { className: 'vst-sample-actions' },
+                  h('span', { className: 'vst-sample-btn', style: { background: brand, color: onBrand } }, 'Action'),
+                  h('span', { className: 'vst-sample-chip', style: { color: success, background: withAlpha(success, 0.16) } }, 'ok'),
+                  h('span', { className: 'vst-sample-chip', style: { color: warn, background: withAlpha(warn, 0.16) } }, 'warn'),
+                  h('span', { className: 'vst-sample-chip', style: { color: error, background: withAlpha(error, 0.16) } }, 'err'),
+                ),
+              ),
+              // input field (layer background, theme border, secondary placeholder)
+              h('div', { className: 'vst-sample-input', style: { background: layer, borderColor: border } },
+                h('span', { style: { color: label2 } }, 'Type a message\u2026'),
               ),
             );
           }
@@ -722,6 +971,22 @@ window.__ModuleLoader__.load({
               list.push(h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')));
             }
             return list;
+          }
+
+          function removeButton(id) {
+            return h(
+              'button',
+              {
+                className: 'vst-remove-btn',
+                title: t('remove'),
+                'aria-label': t('remove'),
+                onClick: (e) => {
+                  e.stopPropagation();
+                  removeTheme(id);
+                },
+              },
+              '×',
+            );
           }
 
           function card(theme, kind) {
@@ -741,7 +1006,7 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'vst-name' }, theme.name || theme.displayName),
                 h('span', { className: 'vst-badges' }, badges(theme, kind)),
               ),
-              previewStrip(theme),
+              themeSample(theme),
               theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
               h(
                 'div',
@@ -749,8 +1014,9 @@ window.__ModuleLoader__.load({
                 h(
                   'span',
                   { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
-                  isSelected ? t('applied') : t('apply'),
+                  isSelected ? '✓ ' + t('applied') : t('apply'),
                 ),
+                removeButton(theme.id),
               ),
             );
           }
@@ -794,9 +1060,29 @@ window.__ModuleLoader__.load({
                   '.vst-badge-installed{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary);}' +
                   '.vst-badge-market{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);}' +
                   '.vst-badge-ni{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary);}' +
-                  '.vst-preview{display:flex;gap:4px;height:18px;border-radius:6px;overflow:hidden;}' +
-                  '.vst-swatch{flex:1;display:block;}' +
-                  '.vst-swatch.is-empty{background:var(--dsw-alias-bg-layer-2);}' +
+                  '.vst-sample{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:8px;' +
+                  'border:1px solid;overflow:hidden;}' +
+                  '.vst-sample-head{display:flex;align-items:center;gap:6px;}' +
+                  '.vst-sample-dot{width:9px;height:9px;border-radius:999px;flex-shrink:0;}' +
+                  '.vst-sample-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;}' +
+                  '.vst-sample-badge{font-size:9px;padding:1px 6px;border-radius:999px;border:1px solid;flex-shrink:0;}' +
+                  '.vst-sample-msg{max-width:88%;padding:6px 9px;border-radius:9px;font-size:11px;line-height:1.35;}' +
+                  '.vst-sample-user{align-self:flex-end;border-radius:9px 9px 2px 9px;}' +
+                  '.vst-sample-ai{align-self:flex-start;border-radius:9px 9px 9px 2px;border:1px solid;display:flex;flex-direction:column;gap:6px;}' +
+                  '.vst-sample-body{display:flex;flex-wrap:wrap;gap:2px;}' +
+                  '.vst-sample-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap;}' +
+                  '.vst-sample-btn{font-size:10px;font-weight:600;padding:3px 9px;border-radius:6px;}' +
+                  '.vst-sample-chip{font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;}' +
+                  '.vst-sample-input{display:flex;align-items:center;padding:7px 10px;border-radius:8px;border:1px solid;font-size:11px;}' +
+                  '.vst-sample-loading{background:var(--dsw-alias-bg-layer-2);position:relative;height:96px;}' +
+                  '.vst-sample-shimmer{position:absolute;inset:0;transform:translateX(-100%);' +
+                  'background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);' +
+                  'animation:vst-shimmer 1.2s infinite;}' +
+                  '@keyframes vst-shimmer{100%{transform:translateX(100%);}}' +
+                  '.vst-remove-btn{font:inherit;font-size:14px;line-height:1;padding:3px 8px;cursor:pointer;' +
+                  'color:var(--dsw-alias-label-secondary);background:transparent;' +
+                  'border:1px solid var(--dsw-alias-border-l2);border-radius:6px;}' +
+                  '.vst-remove-btn:hover{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary);}' +
                   '.vst-desc{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);' +
                   'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}' +
                   '.vst-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}' +
@@ -870,6 +1156,8 @@ window.__ModuleLoader__.load({
         );
 
         return async () => {
+          // Stop the boot-race re-assertion so it never touches a disposed ctx.
+          try { clearInterval(reassertTimer); } catch (err) { /* ignore */ }
           if (localeDisposer) {
             try { localeDisposer(); } catch (err) { /* ignore */ }
             localeDisposer = null;
