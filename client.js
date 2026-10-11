@@ -493,15 +493,16 @@ window.__ModuleLoader__.load({
 
         localeDisposer = ctx.locale.register(NS, 'en', {
           'section.title': 'VS Code Themes',
-          'search.placeholder': 'Search themes…',
-          'applied': 'Applied',
-          'apply': 'Apply',
+          'search.placeholder': 'Search installed & marketplace themes…',
+          'active': 'Active',
+          'installed': 'installed',
           'no.results': 'No themes match your search.',
-          'count': '{n} themes',
+          'count': '{n} themes installed',
+          'apply.hint': 'click on a theme card to preview/apply',
           'scheme.dark': 'dark',
           'scheme.light': 'light',
-          'market.search.placeholder': 'Search the VS Code Marketplace…',
-          'market.section': 'Marketplace results',
+          'installed.section': 'Installed',
+          'market.section': 'Marketplace',
           'market.empty': 'Search to discover themes from the VS Code Marketplace.',
           'market.busy': 'Searching…',
           'market.mountError': 'Marketplace search is unavailable right now.',
@@ -510,6 +511,8 @@ window.__ModuleLoader__.load({
           'market.error': 'Could not fetch this theme.',
           'market.minChars': 'Type at least 2 characters to search.',
           'remove': 'Remove this theme',
+          'remove.label': 'Remove',
+          'uninstall.label': 'Uninstall',
         });
 
         const themeDisposers = [];
@@ -851,6 +854,7 @@ window.__ModuleLoader__.load({
             const isInstalled = installedIds.has(theme.id);
             const isPending = pendingIds.has(theme.id);
             const def = marketTokens[theme.id] || fetchedCache.current[theme.id] || null;
+            const tk = (def && def.tokens) || {};
             return h(
               'div',
               {
@@ -858,18 +862,14 @@ window.__ModuleLoader__.load({
                 className: 'vst-card' + (isSelected ? ' selected' : '') + (isPending ? ' is-disabled' : ''),
                 role: 'button',
                 'aria-pressed': isSelected,
+                title: (theme.displayName || theme.name) + (theme.description ? '\n' + theme.description : ''),
                 onClick: () => previewTheme(theme),
+                style: cardSurfaceStyle(tk, isSelected),
               },
               h(
                 'div',
                 { className: 'vst-card-top' },
-                h('span', { className: 'vst-name' }, theme.displayName || theme.name),
-                h(
-                  'span',
-                  { className: 'vst-badges' },
-                  h('span', { key: 'market', className: 'vst-badge vst-badge-market' }, 'marketplace'),
-                  isInstalled ? h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')) : null,
-                ),
+                h('span', { className: 'vst-name', style: { color: tk['--dsw-alias-label-primary'] } }, theme.displayName || theme.name),
               ),
               // Rendered sample of the theme in its actual colors. Filled in
               // the definition is fetched in the background; a loading shimmer
@@ -881,15 +881,14 @@ window.__ModuleLoader__.load({
                     { className: 'vst-sample vst-sample-loading', 'aria-hidden': true },
                     h('span', { className: 'vst-sample-shimmer' }),
                   ),
-              theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
               h(
                 'div',
                 { className: 'vst-card-actions' },
-                h(
-                  'span',
-                  { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
-                  isPending ? t('market.installing') : isSelected ? '✓ ' + t('applied') : t('apply'),
-                ),
+                isPending
+                  ? h('span', { className: 'vst-state' }, t('market.installing'))
+                  : isSelected
+                    ? activePill(def && def.tokens)
+                    : null,
                 !isInstalled
                   ? h(
                       'button',
@@ -903,7 +902,7 @@ window.__ModuleLoader__.load({
                       },
                       t('market.install'),
                     )
-                  : removeButton(theme.id),
+                  : removeButton(theme.id, t('uninstall.label')),
               ),
             );
           }
@@ -912,7 +911,9 @@ window.__ModuleLoader__.load({
           // the card shows what the theme really looks like rather than a flat
           // swatch strip. Every color is bound via inline `style` to the target
           // theme's tokens — a `.vst-*` class would resolve `var(--dsw-alias-*)`
-          // to the currently-applied theme, not this card's theme.
+          // to the currently-applied theme, not this card's theme. The preview
+          // is intentionally compact so a card stays small while still showing
+          // the real look of the theme.
           function themeSample(theme) {
             const tk = theme.tokens || {};
             const bg = tk['--dsw-alias-bg-base'] || '#14151a';
@@ -925,18 +926,9 @@ window.__ModuleLoader__.load({
             const error = tk['--dsw-alias-state-error-primary'] || '#c24038';
             const border = tk['--dsw-alias-border-l2'] || tk['--dsw-alias-border-l1'] || '#3a3f4b';
             const onBrand = contrastOn(brand);
-            const name = (theme.displayName || theme.name || theme.id || 'Theme').slice(0, 28);
             return h(
               'div',
-              { className: 'vst-sample', 'aria-hidden': true, style: { background: bg, borderColor: border } },
-              // header: brand dot + theme name + scheme badge
-              h(
-                'div',
-                { className: 'vst-sample-head' },
-                h('span', { className: 'vst-sample-dot', style: { background: brand } }),
-                h('span', { className: 'vst-sample-name', style: { color: label } }, name),
-                h('span', { className: 'vst-sample-badge', style: { color: label2, borderColor: border } }, theme.colorScheme || 'theme'),
-              ),
+              { className: 'vst-sample', 'aria-hidden': true },
               // user message bubble (brand background, right-aligned)
               h('div', { className: 'vst-sample-msg vst-sample-user', style: { background: brand, color: onBrand } }, 'How does it look?'),
               // assistant bubble (layer background) with primary + secondary text,
@@ -949,31 +941,61 @@ window.__ModuleLoader__.load({
                   h('span', { style: { color: label2 } }, 'in your colors.'),
                 ),
                 h('div', { className: 'vst-sample-actions' },
-                  h('span', { className: 'vst-sample-btn', style: { background: brand, color: onBrand } }, 'Action'),
+                  h('span', { className: 'vst-sample-btn', style: { background: brand, color: onBrand } }, 'Go'),
                   h('span', { className: 'vst-sample-chip', style: { color: success, background: withAlpha(success, 0.16) } }, 'ok'),
                   h('span', { className: 'vst-sample-chip', style: { color: warn, background: withAlpha(warn, 0.16) } }, 'warn'),
                   h('span', { className: 'vst-sample-chip', style: { color: error, background: withAlpha(error, 0.16) } }, 'err'),
                 ),
               ),
-              // input field (layer background, theme border, secondary placeholder)
-              h('div', { className: 'vst-sample-input', style: { background: layer, borderColor: border } },
-                h('span', { style: { color: label2 } }, 'Type a message\u2026'),
-              ),
             );
           }
 
-          function badges(theme, kind) {
-            const list = [];
-            if (theme.colorScheme) {
-              list.push(h('span', { key: 'scheme', className: 'vst-badge' }, t('scheme.' + theme.colorScheme)));
-            }
-            if (kind === 'installed') {
-              list.push(h('span', { key: 'kind', className: 'vst-badge vst-badge-installed' }, t('installed')));
-            }
-            return list;
+          // Prominent "Active" indicator for the applied theme. Colors are
+          // computed INLINE from the theme's own tokens — a `.vst-*` class would
+          // resolve `var(--dsw-alias-brand-primary)` to the applied theme, which
+          // happens to be this card only for the active one. `contrastOn` picks a
+          // legible text colour and the subtle outline keeps the pill bounded
+          // even when a theme's brand colour is very close to its background.
+          function activePill(tokens) {
+            const brand = (tokens && tokens['--dsw-alias-brand-primary']) || '#4d78cc';
+            const text = contrastOn(brand);
+            return h(
+              'span',
+              {
+                className: 'vst-active-pill',
+                style: {
+                  background: brand,
+                  color: text,
+                  borderColor: withAlpha(text, 0.5),
+                },
+              },
+              h('span', { className: 'vst-active-dot', style: { background: text } }),
+              t('active'),
+            );
           }
 
-          function removeButton(id) {
+          // The applied card's ring + glow, in the theme's own accent colour.
+          // Set inline (not via a CSS var) so a weak brand colour can't make the
+          // indicator vanish; the solid 3px ring is always visible.
+          function activeRingStyle(tokens) {
+            const brand = (tokens && tokens['--dsw-alias-brand-primary']) || '#4d78cc';
+            return { boxShadow: '0 0 0 3px ' + brand + ', 0 4px 18px ' + withAlpha(brand, 0.35) };
+          }
+
+          // The card's own surface colours, bound inline to the card's theme tokens so
+          // each card looks like that theme in DSH chat rather than following the
+          // applied theme. A class-based rule would resolve the design-token vars to
+          // the applied theme, which is inaccurate and misleading.
+          function cardSurfaceStyle(tokens, isSelected) {
+            const tk = tokens || {};
+            return {
+              background: tk['--dsw-alias-bg-base'],
+              borderColor: tk['--dsw-alias-border-l1'] || tk['--dsw-alias-border-l2'],
+              ...(isSelected ? activeRingStyle(tk) : {}),
+            };
+          }
+
+          function removeButton(id, label) {
             return h(
               'button',
               {
@@ -985,12 +1007,13 @@ window.__ModuleLoader__.load({
                   removeTheme(id);
                 },
               },
-              '×',
+              label,
             );
           }
 
           function card(theme, kind) {
             const isSelected = theme.id === selected;
+            const tk = theme.tokens || {};
             return h(
               'div',
               {
@@ -998,25 +1021,21 @@ window.__ModuleLoader__.load({
                 className: 'vst-card' + (isSelected ? ' selected' : ''),
                 role: 'button',
                 'aria-pressed': isSelected,
+                title: (theme.name || theme.displayName) + (theme.description ? '\n' + theme.description : ''),
                 onClick: () => selectTheme(theme.id),
+                style: cardSurfaceStyle(tk, isSelected),
               },
               h(
                 'div',
                 { className: 'vst-card-top' },
-                h('span', { className: 'vst-name' }, theme.name || theme.displayName),
-                h('span', { className: 'vst-badges' }, badges(theme, kind)),
+                h('span', { className: 'vst-name', style: { color: tk['--dsw-alias-label-primary'] } }, theme.name || theme.displayName),
               ),
               themeSample(theme),
-              theme.description ? h('span', { className: 'vst-desc' }, theme.description) : null,
               h(
                 'div',
                 { className: 'vst-card-actions' },
-                h(
-                  'span',
-                  { className: 'vst-state' + (isSelected ? ' is-selected' : '') },
-                  isSelected ? '✓ ' + t('applied') : t('apply'),
-                ),
-                removeButton(theme.id),
+                isSelected ? activePill(theme.tokens) : null,
+                removeButton(theme.id, kind === 'bundled' ? t('remove.label') : t('uninstall.label')),
               ),
             );
           }
@@ -1043,48 +1062,38 @@ window.__ModuleLoader__.load({
                   'color:var(--dsw-alias-label-secondary);}' +
                   '.vst-market{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:16px;}' +
                   '.vst-market-body{display:flex;flex-direction:column;gap:10px;}' +
-                  '.vst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}' +
-                  '.vst-card{display:flex;flex-direction:column;gap:8px;padding:14px;text-align:left;' +
-                  'background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:10px;' +
+                  '.vst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}' +
+                  '.vst-card{display:flex;flex-direction:column;gap:6px;padding:8px;text-align:left;' +
+                  'background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:9px;' +
                   'color:var(--dsw-alias-label-primary);font:inherit;transition:border-color .12s,transform .06s;}' +
                   '.vst-card[role="button"]{cursor:pointer;}' +
                   '.vst-card[role="button"]:hover{border-color:var(--dsw-alias-brand-primary);}' +
                   '.vst-card[role="button"]:active{transform:scale(.99);}' +
-                  '.vst-card.selected{border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary);}' +
+                  '.vst-card.selected{border-color:var(--dsw-alias-brand-primary);}' +
                   '.vst-card.is-disabled{opacity:.6;}' +
                   '.vst-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
-                  '.vst-name{font-size:14px;font-weight:600;}' +
-                  '.vst-badges{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}' +
-                  '.vst-badge{font-size:10px;padding:2px 7px;border-radius:999px;' +
-                  'background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2);}' +
-                  '.vst-badge-installed{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary);}' +
-                  '.vst-badge-market{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);}' +
-                  '.vst-badge-ni{color:var(--dsw-alias-state-warn-primary);border-color:var(--dsw-alias-state-warn-primary);}' +
-                  '.vst-sample{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:8px;' +
-                  'border:1px solid;overflow:hidden;}' +
-                  '.vst-sample-head{display:flex;align-items:center;gap:6px;}' +
-                  '.vst-sample-dot{width:9px;height:9px;border-radius:999px;flex-shrink:0;}' +
-                  '.vst-sample-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;}' +
-                  '.vst-sample-badge{font-size:9px;padding:1px 6px;border-radius:999px;border:1px solid;flex-shrink:0;}' +
-                  '.vst-sample-msg{max-width:88%;padding:6px 9px;border-radius:9px;font-size:11px;line-height:1.35;}' +
-                  '.vst-sample-user{align-self:flex-end;border-radius:9px 9px 2px 9px;}' +
-                  '.vst-sample-ai{align-self:flex-start;border-radius:9px 9px 9px 2px;border:1px solid;display:flex;flex-direction:column;gap:6px;}' +
-                  '.vst-sample-body{display:flex;flex-wrap:wrap;gap:2px;}' +
-                  '.vst-sample-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap;}' +
-                  '.vst-sample-btn{font-size:10px;font-weight:600;padding:3px 9px;border-radius:6px;}' +
-                  '.vst-sample-chip{font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;}' +
-                  '.vst-sample-input{display:flex;align-items:center;padding:7px 10px;border-radius:8px;border:1px solid;font-size:11px;}' +
-                  '.vst-sample-loading{background:var(--dsw-alias-bg-layer-2);position:relative;height:96px;}' +
+                  '.vst-name{font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+                   '.vst-sample{display:flex;flex-direction:column;gap:3px;padding:0;border-radius:7px;' +
+                   'overflow:hidden;}' +
+                   '.vst-sample-msg{max-width:88%;padding:4px 7px;border-radius:7px;font-size:10px;line-height:1.3;}' +
+                   '.vst-sample-user{align-self:flex-end;border-radius:7px 7px 2px 7px;}' +
+                   '.vst-sample-ai{align-self:flex-start;border-radius:7px 7px 7px 2px;border:1px solid;display:flex;flex-direction:column;gap:4px;}' +
+                   '.vst-sample-body{display:flex;flex-wrap:wrap;gap:2px;}' +
+                   '.vst-sample-actions{display:flex;align-items:center;gap:3px;flex-wrap:wrap;}' +
+                   '.vst-sample-btn{font-size:10px;font-weight:600;padding:2px 6px;border-radius:5px;}' +
+                   '.vst-sample-chip{font-size:9px;font-weight:600;padding:1px 5px;border-radius:999px;}' +
+                   '.vst-sample-loading{background:var(--dsw-alias-bg-layer-2);position:relative;height:74px;}' +
+                   '.vst-active-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;' +
+                   'padding:3px 10px;border-radius:999px;border:1px solid;letter-spacing:.01em;flex-shrink:0;}' +
+                   '.vst-active-dot{width:7px;height:7px;border-radius:999px;flex-shrink:0;}' +
                   '.vst-sample-shimmer{position:absolute;inset:0;transform:translateX(-100%);' +
                   'background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);' +
                   'animation:vst-shimmer 1.2s infinite;}' +
                   '@keyframes vst-shimmer{100%{transform:translateX(100%);}}' +
-                  '.vst-remove-btn{font:inherit;font-size:14px;line-height:1;padding:3px 8px;cursor:pointer;' +
+                  '.vst-remove-btn{font:inherit;font-size:11px;font-weight:500;line-height:1;padding:4px 9px;cursor:pointer;' +
                   'color:var(--dsw-alias-label-secondary);background:transparent;' +
                   'border:1px solid var(--dsw-alias-border-l2);border-radius:6px;}' +
                   '.vst-remove-btn:hover{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary);}' +
-                  '.vst-desc{font-size:11px;line-height:1.35;color:var(--dsw-alias-label-secondary);' +
-                  'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}' +
                   '.vst-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}' +
                   '.vst-state{font-size:12px;color:var(--dsw-alias-label-secondary);}' +
                   '.vst-state.is-selected{color:var(--dsw-alias-brand-primary);font-weight:600;}' +
@@ -1101,7 +1110,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'vst-header' },
               h('h2', { className: 'vst-title' }, t('section.title')),
-              h('p', { className: 'vst-subtitle' }, t('count', { n: localThemes.length })),
+              h('p', { className: 'vst-subtitle' }, t('count', { n: localThemes.length }) + '   ·   ' + t('apply.hint')),
             ),
             h('input', {
               className: 'vst-search',
@@ -1109,10 +1118,12 @@ window.__ModuleLoader__.load({
               placeholder: t('search.placeholder'),
               value: query,
               onChange: (e) => setQuery(e.target.value),
+              ref: marketInputRef,
             }),
             h(
               'div',
               { className: 'vst-section' },
+              h('h3', { className: 'vst-section-title' }, t('installed.section')),
               localThemes.length === 0
                 ? h('div', { className: 'vst-empty' }, t('no.results'))
                 : h('div', { className: 'vst-grid' }, localThemes.map((theme) => card(theme, installedIds.has(theme.id) ? 'installed' : 'bundled'))),
@@ -1125,13 +1136,6 @@ window.__ModuleLoader__.load({
                 ? h(
                     'div',
                     { className: 'vst-market-body' },
-                    h('input', {
-                      className: 'vst-search',
-                      type: 'search',
-                      placeholder: t('market.search.placeholder'),
-                      defaultValue: '',
-                      ref: marketInputRef,
-                    }),
                     marketBusy ? h('p', { className: 'vst-state' }, t('market.busy')) : null,
                     !marketBusy && marketShort ? h('p', { className: 'vst-state' }, t('market.minChars')) : null,
                     !marketBusy && !marketShort && marketError ? h('div', { className: 'vst-error' }, marketError) : null,

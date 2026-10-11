@@ -7,10 +7,16 @@ can resume from here.
 
 ## Current status — 2026-10-10
 
-**State: FULLY WORKING — four fixes added (persistence + remove, marketplace card
-samples, applied-theme persistence across refresh, rendered theme samples instead of
-flat swatches). Pushed to remote (commit 94cc366) and the repo is PUBLIC:
-https://github.com/zxbc/dsh-vscode-themes2.**
+**State: FULLY WORKING + lean-design pass + card-accuracy pass (UNCOMMITTED). The four
+fixes are pushed (commit 94cc366) and the repo is PUBLIC:
+https://github.com/zxbc/dsh-vscode-themes2. On top of that, a **lean/compact redesign**
+(smaller rendered previews, one consolidated search with Installed + Marketplace
+sections, a prominent ring+pill "Active" indicator, dropped the redundant colour-scheme
+badge) plus a **card-accuracy pass** (each card's background/border/title now bound to
+that theme's OWN tokens, the "Apply" text dropped, and the count line now reads
+"N themes installed · click on a theme card to preview/apply") are done in `client.js`
+only and **delivered locally for the user to test — do NOT push yet.** See the 2026-10-10
+(lean design) and (card-accuracy) entries in the session log.**
 
 - Marketplace search: uncontrolled input polled every 1 s with change detection —
   no per-keystroke queries.
@@ -183,6 +189,103 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
   only — see pitfalls 2–3).
 
 ## Session log
+
+- **2026-10-10 (card-accuracy)** — Four follow-ups requested by the user, all in
+  `client.js` only:
+  - **Card background/border/title bound to the theme's OWN colours.** Previously the
+    card chrome used the *applied* theme's tokens (a `.vst-*` class resolves
+    `var(--dsw-alias-*)` to the currently-applied theme), so every card looked tinted by
+    whichever theme was applied — inaccurate and misleading. Added a new
+    `cardSurfaceStyle(tokens, isSelected)` helper that returns an inline `style` with
+    `background: <theme bg-base>`, `borderColor: <theme border-l1>`, and the 3px brand
+    ring for the active card; both `card()` and `marketCard()` now pass it to the card
+    `div`. The title span gets an inline `style={{ color: <theme label-primary> }}` in
+    both. `marketCard` guards with `(def && def.tokens) || {}` — before the definition is
+    fetched the tokens are `{}` so those styles are `undefined` and React omits them
+    (the card falls back to the applied-theme colours while the shimmer shows).
+  - **Preview de-boxed so a card reads as a real DSH chat surface.** The preview
+    (`.vst-sample`) previously had its own `border:1px solid` + background; now that the
+    card background equals the preview background (`bg-base`) that produced a redundant
+    nested box. Removed the preview's border + inline background and zeroed its padding
+    (`.vst-sample{…padding:0;…}`), so the user/assistant bubbles sit directly on the card's
+    own surface. The assistant bubble keeps its own 1px border (a real chat message).
+  - **"Apply" text dropped** from both `card()` and `marketCard()` action rows
+    (`: h('span',{…},t('apply'))` → `: null`). The action row is never empty because the
+    Remove/Uninstall (installed/bundled) or Install (marketplace) button always renders;
+    the dead `apply` locale key was removed.
+  - **Count line made explicit.** `'count'` locale changed from `"{n} themes"` to
+    `"{n} themes installed"`, and a new `'apply.hint'` key (`"click on a theme card to
+    preview/apply"`) is appended to the subtitle line, joined with a `"   ·   "`
+    separator — e.g. *"28 themes installed   ·   click on a theme card to preview/apply"*.
+    (`localThemes` = installed + bundled themes, i.e. the themes the user applies from.)
+  - **Verification:** standalone test page (`/tmp/gen-vst.js` — re-synced to the new card
+    chrome) + Playwright measurements: every card's bg/border/title now match its theme's
+    real tokens (all 14 checked), title-on-background contrast ≥ 4.1:1 (the low ones are
+    the theme's own inherent contrast, e.g. Solarized Light+ #657b83 on #fdf6e3 — that IS
+    how the theme looks, and accuracy was the goal), preview border = 0px, no "Apply"
+    text, assistant-bubble body text contained (overflow=false — a vision claim of
+    "text escaping the bubble" was **disproven** by measurement). A generator bug caught
+    here: a `${…}` template interpolation had been written as `+(…)+'` JS concatenation,
+    silently emitting literal broken `style` text. **Uncommitted, unpushed — delivered
+    locally for the user to verify.**
+
+- **2026-10-10 (card polish, follow-up)** — Three small follow-ups on the lean design, all
+  in `client.js` only:
+  - **Removed the redundant per-card kind labels** (`marketplace` / `installed` badges in
+    `marketCard`). The cards already sit in their own "Installed" / "Marketplace" sections,
+    so the labels were noise that was truncating the name. The `vst-badge*` CSS was removed
+    (dead). The name now gets the full card width (146px) and never truncates.
+  - **`×` remove button → a text button** in the same empty-with-border style
+    (`.vst-remove-btn` font 14px→11px, `padding 3px 8px`→`4px 9px`). Label is context-aware:
+    **"Remove"** for a bundled theme, **"Uninstall"** for an installed (marketplace) theme —
+    via a new `removeButton(id, label)` param and locale keys `remove.label` /
+    `uninstall.label`. Measured worst case (installed + active card = "Active" pill +
+    "Uninstall"): fits on one line, no wrap.
+  - **Richer hover tooltip**: each card's `title` is now the **full theme name on line 1**
+    and the **description on line 2** (`name + '\n' + description`), so a name that was too
+    long to show in full can be read on hover. Applied to both `card()` and `marketCard()`.
+  - Verified with Playwright (name full-width 146px, no truncation, Remove button 61px and
+    not clipped, all previews exactly 146px wide, worst-case row no-wrap). The OpenRouter
+    vision pass flagged "clipped button / uneven preview widths" — **disproven** by the
+    objective measurements (button 1px inside padding; preview width uniform). **Uncommitted,
+    unpushed — delivered locally for the user to verify.**
+
+- **2026-10-10 (lean design)** — On user request, made the theme cards **lean and compact
+  so many more are visible at a glance**. Goal was density (fit more cards without
+  scrolling), while **keeping the rendered preview** (a flat colour strip was explicitly
+  rejected). All changes are in `client.js` only; host half (`index.js`/`marketplace.js`)
+  untouched.
+  - **Rendered preview shrunk, not replaced.** `themeSample` now renders just the user
+    bubble + AI bubble (with its body text, "Go" button, and ok/warn/err state chips); the
+    header row (brand dot/name/badge) and the input row were dropped, and padding/fonts
+    shrank (msg 12→10px, btn 11→10px, chip 10→9px, sample padding 8→5px). Preview is 79px
+    tall (was ~96px). Every colour is still inline-bound to the card's own tokens.
+  - **One search field, two result sections.** The installed/bundled search and the
+    marketplace search are consolidated into a single input (`value={query}`,
+    `onChange:setQuery`, `ref:marketInputRef`). The controlled state drives the
+    client-side filter of local themes; the 1s poll reads the same input via
+    `marketInputRef.current.value` (= `query`) to drive marketplace search. Results are
+    delineated into **"Installed"** and **"Marketplace"** sections. `market.search.
+    placeholder` and the unused `applied` key were removed from the locale.
+  - **Prominent active indicator (designed, not inherited).** The applied card gets an
+    inline **3px brand ring + glow** (`activeRingStyle`, `box-shadow:0 0 0 3px brand,
+    0 4px 18px withAlpha(brand,0.35)`) **plus a filled "● Active" pill** (`activePill`,
+    brand background + `contrastOn` text + subtle outline) replacing the old "✓ Applied"
+    text. Works for both installed and marketplace cards.
+  - **Redundant `colorScheme` badge dropped** from installed cards (the preview background
+    already conveys light/dark); names now get full width and no longer truncate
+    ("Cappuccin M…" → "Cappuccin Mocha"). The `badges()` helper was removed (market cards
+    have their own badges). The description line was removed and moved to the card's
+    `title` tooltip.
+  - **Density CSS:** `.vst-grid` gap 16→8px, min-col 180→150px; `.vst-card` padding 12→8px,
+    gap 8→6px. Result: **card 164×148px**, **5 columns @ 900px**, all 14 bundled cards
+    visible without scrolling.
+  - **Verification:** standalone test page (`/tmp/gen-vst.js` re-extracts the EXACT CSS +
+    `BUNDLED_THEMES` from `client.js`, renders all 14 themes) + Playwright element-box
+    measurement (card 164×148, preview 79px, actions row one line, no overflow, no name
+    truncation, 5 cols) + OpenRouter vision pass (lean, readable, active indicator clear).
+  - **Status: UNCOMMITTED, UNPUSHED** — delivered locally for the user to test; do **not**
+    push to the github remote.
 
 - **2026-10-10 (final)** — On user request (lifting the no-push constraint): committed
   the two fixes as `94cc366`, pushed to `origin/main`, and made the repo PUBLIC via the
