@@ -10,11 +10,16 @@ session so future sessions can resume from here.
 
 **State: FULLY WORKING — user-verified, everything pushed (repo PUBLIC:
 https://github.com/zxbc/dsh-vscode-themes2). `origin/main` is up to date with
-local `main`. **Hub submission (dsh-plugin.org) — Phase 1 done:** MIT LICENSE +
-`"license"` field, public README (install command, screenshots, permissions,
-compatibility), all three gallery screenshots committed under `screenshots/`; the full
-plan lives in untracked `SUBMISSION_PLAN.md`, remaining phases (GitHub topic,
-submission issue) await user review. Since the original four fixes (commit 94cc366): a **lean/compact redesign** (smaller rendered previews, one consolidated
+local `main`. **Hub submission (dsh-plugin.org) — SUBMITTED 2026-10-11:** all five
+hard listing requirements met (public repo, `dsh-plugin` topic set via
+`PUT /repos/…/topics`, README install command, `apply(ctx)` modules, no
+impersonation); README carries the MIT license, the single current gallery
+screenshot, permissions and compatibility sections. The daily crawler lists the
+repo at its next refresh (listing 404s until then); the optional fast-path
+submission issue in `dshplugin/dsh-plugin-hub` is blocked by token scope
+(fine-grained PAT cannot open issues there) — pending user click or skip.
+Plan: untracked `SUBMISSION_PLAN.md`; reusable skill: `dsh-plugin-hub-submission`
+in `/dsh-data/skills/`. Since the original four fixes (commit 94cc366): a **lean/compact redesign** (smaller rendered previews, one consolidated
 search with Installed + Marketplace sections, a prominent ring+pill "Active"
 indicator, dropped the redundant colour-scheme badge) plus a **card-accuracy pass**
 (each card's background/border/title bound to that theme's OWN tokens) in
