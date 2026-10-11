@@ -5,9 +5,11 @@ A VS Code theme switcher plugin for the DeepSeek Harness (DSH) Web UI.
 process.** Update this file at the end of every working session so future sessions
 can resume from here.
 
-## Current status — 2026-10-10
+## Current status — 2026-10-11
 
-**State: FULLY WORKING + lean-design pass + card-accuracy pass (UNCOMMITTED). The four
+**State: FULLY WORKING + lean-design pass + card-accuracy pass + include-inheritance &
+shiki tokenColors mapping (2026-10-11, host `marketplace.js` only; local commit, NOT
+pushed — user verifies first). The four
 fixes are pushed (commit 94cc366) and the repo is PUBLIC:
 https://github.com/zxbc/dsh-vscode-themes2. On top of that, a **lean/compact redesign**
 (smaller rendered previews, one consolidated search with Installed + Marketplace
@@ -190,6 +192,39 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-11** — Ported the include-inheritance + shiki tokenColors prototype into
+  the real plugin (host-side `marketplace.js` only; `client.js`, `index.js` and the
+  `{id,name,colorScheme,tokens,publisher,version}` return contract unchanged):
+  - **`resolveIncludes(themeObj, themePath, readFile)`** — follows the VS Code
+    `include` chain (path relative to the theme file's directory inside the .vsix;
+    child wins on `colors`; `tokenColors` = [base..., child...] so later rules win;
+    cycle-guarded, depth-capped at 8; a missing target warns and stops the chain
+    instead of crashing). Base files are read from the same in-memory zip buffer —
+    no second download.
+  - **`mapTokenColorsToShiki(theme)`** — maps tokenColors onto the nine
+    `--shiki-token-*` vars (keyword, string, string-expression, comment, constant,
+    function, parameter, punctuation, link) the web shiki highlighter consumes;
+    they ride in the same `tokens` map as the dsw aliases and are applied as inline
+    body styles by ThemePresenter (no runtime/theme-sheet changes needed).
+  - `fetchThemeDefinition` now: parse → resolve includes → map dsw aliases on the
+    MERGED colors → return dsw aliases + shiki tokens (no key collision:
+    `--dsw-alias-*` vs `--shiki-token-*`).
+  - Why: include-dependent packages (fresh-material, wow-bundle, railgun,
+    ocean-space, Amethyst Dark HC, kanagawa-black, ...) previously installed with
+    empty/partial palettes or crashed. Prototype E2E over 11 real .vsix archives /
+    38 themes: 18 OK before → 37 OK after. Only remaining failure: One Dark Pro
+    Monokai Darker (no `editor.foreground` anywhere — pre-existing
+    `mapToDswTokens` strictness, intentionally unchanged).
+  - Verified: `node --check`; unit tests (child-wins, chain depth 3, later-rule-
+    wins); E2E through the INSTALLED profile path — dracula dsw=13 shiki=9,
+    wow-bundle "Dark+ (WoW)" dsw=13 shiki=8, fresh-material shiki=7, kanagawa-
+    black bg=#000 (child override) — every number matches the prototype's
+    prediction. Live server: the `hmr.root` entry in $DSH_HOME/cordis.patch.yml
+    already covers this repo; touching the file triggers partialReload, which
+    re-imports the entry (index.js) and recreates the service fiber with the new
+    module graph (verified against dsh-hmr source — a changed dependency is
+    enough to pull its importer entry into the re-import).
+  - Committed locally on `main`; NOT pushed (user tests first).
 - **2026-10-10 (card-accuracy)** — Four follow-ups requested by the user, all in
   `client.js` only:
   - **Card background/border/title bound to the theme's OWN colours.** Previously the

@@ -2,6 +2,7 @@
 // the Host (Node) process: real fetch, DecompressionStream, Blob, Response,
 // TextDecoder, DataView. No Cordis / Typert wiring here — the service wrapper is
 // added on top by index.js once the plugin is restored to a working state.
+import path from 'node:path';
 
 // ------------------------------------------------------------------
 // Color utilities
@@ -91,6 +92,126 @@ export function mapToDswTokens(colors, uiTheme) {
 }
 
 // ------------------------------------------------------------------
+// Map a VS Code theme's `tokenColors` (TextMate scope rules) onto the nine
+// `--shiki-token-*` CSS variables that the web frontend's shiki highlighter
+// consumes (createCssVariablesTheme, prefix "--shiki-", in
+// dsh-client-ui-primitives; the static sheet lives in dsh-client-ui-theme).
+// The returned tokens ride in the same `tokens` map as the dsw aliases and are
+// applied by ThemePresenter as inline body styles, which beat the static sheet.
+//
+// Category → TextMate scope candidates (first candidate = strongest preference):
+//   keyword:            keyword, storage
+//   string:             string
+//   string-expression:  meta.template.expression, punctuation.definition.template-expression, string.interpol
+//   comment:            comment
+//   constant:           constant
+//   function:           entity.name.function, support.function
+//   parameter:          variable.parameter
+//   punctuation:        punctuation
+//   link:               markup.underline.link
+//
+// A rule's `scope` may be a string or array of patterns; a pattern may hold
+// several space-separated scopes (all must apply; the last is innermost). A
+// rule matches a candidate when any part equals it or is scoped below it.
+// Preference: exact > scoped, innermost > outer, then fewest dots, then LATER
+// rule wins (VS Code processes tokenColors in order). Rules without a
+// foreground (fontStyle-only) carry no color and are ignored.
+// ------------------------------------------------------------------
+const SHIKI_CATEGORIES = {
+  keyword: ['keyword', 'storage'],
+  string: ['string'],
+  'string-expression': ['meta.template.expression', 'punctuation.definition.template-expression', 'string.interpol'],
+  comment: ['comment'],
+  constant: ['constant'],
+  function: ['entity.name.function', 'support.function'],
+  parameter: ['variable.parameter'],
+  punctuation: ['punctuation'],
+  link: ['markup.underline.link'],
+};
+
+function shikiScopeParts(rule) {
+  if (!rule || rule.scope === undefined || rule.scope === null) return [];
+  const scopes = Array.isArray(rule.scope) ? rule.scope : [rule.scope];
+  const parts = [];
+  for (const s of scopes) {
+    if (typeof s !== 'string' || !s.trim()) continue;
+    parts.push(s.trim());
+  }
+  return parts;
+}
+
+function shikiMatchScore(pattern, candidate) {
+  // Best { score, dotCount, part } over the pattern's space-separated parts.
+  const parts = pattern.split(/\s+/);
+  let best = null;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    let score = 0;
+    if (p === candidate) score = 100;
+    else if (p.startsWith(candidate + '.')) score = 90;
+    else continue;
+    if (i < parts.length - 1) score -= 45; // outer-part match is weaker
+    const dotCount = p.split('.').length;
+    if (!best || score > best.score || (score === best.score && dotCount < best.dotCount)) {
+      best = { score, dotCount, part: p };
+    }
+  }
+  return best;
+}
+
+/**
+ * Pick one winning color per shiki category from a theme's tokenColors rules.
+ * @param {object|object[]|Array<object[]>} theme - theme object with tokenColors,
+ *        a raw tokenColors rule array, or legacy tmTheme {settings: [...]}.
+ * @returns {{ tokens: Object<string,string>, detail: object }} flat
+ *        `--shiki-token-<cat>` → color map plus per-category match provenance.
+ */
+export function mapTokenColorsToShiki(theme) {
+  let rules = [];
+  if (Array.isArray(theme)) {
+    for (const r of theme) {
+      if (Array.isArray(r)) rules.push(...r);       // array of arrays (multi-scope rule)
+      else if (r && typeof r === 'object') rules.push(r);
+    }
+  } else if (theme && typeof theme === 'object') {
+    if (Array.isArray(theme.tokenColors)) rules = theme.tokenColors;
+    else if (Array.isArray(theme.settings)) rules = theme.settings; // legacy tmTheme
+    else if (Array.isArray(theme.rules)) rules = theme.rules;        // rare legacy
+  }
+
+  const tokens = {};
+  const detail = {};
+  for (const [category, candidates] of Object.entries(SHIKI_CATEGORIES)) {
+    let best = null;
+    for (let idx = 0; idx < rules.length; idx++) {
+      const rule = rules[idx];
+      const fg = rule && rule.settings && typeof rule.settings.foreground === 'string' ? rule.settings.foreground : null;
+      if (!fg) continue;
+      for (const candidate of candidates) {
+        for (const pattern of shikiScopeParts(rule)) {
+          const m = shikiMatchScore(pattern, candidate);
+          if (!m) continue;
+          const candRank = candidates.indexOf(candidate); // earlier candidate = stronger
+          const key = { score: m.score, candRank, dotCount: m.dotCount, idx };
+          if (!best ||
+              key.score > best.score ||
+              (key.score === best.score && key.candRank < best.candRank) ||
+              (key.score === best.score && key.candRank === best.candRank && key.dotCount < best.dotCount) ||
+              (key.score === best.score && key.candRank === best.candRank && key.dotCount === best.dotCount && key.idx > best.idx)) {
+            best = { ...key, fg, scope: pattern, candidate };
+          }
+        }
+      }
+    }
+    if (best) {
+      tokens['--shiki-token-' + category] = best.fg;
+      detail[category] = { scope: best.scope, ruleIndex: best.idx, score: best.score, candidate: best.candidate };
+    }
+  }
+  return { tokens, detail };
+}
+
+// ------------------------------------------------------------------
 // JSONC → JSON. VS Code theme files are JSONC: they may contain // and
 // /* */ comments AND trailing commas (`, }` / `, ]`), neither of which
 // JSON.parse accepts. Both are stripped here.
@@ -143,6 +264,100 @@ function stripJsonc(s) {
     i += 1;
   }
   return out;
+}
+
+// ------------------------------------------------------------------
+// Theme `include` inheritance. VS Code themes may declare an `include` path
+// (relative to the theme file's directory in the package) pointing at a BASE
+// theme; the including theme overrides it. Merge semantics: `colors` — child
+// keys win; `tokenColors` — [base..., child...] so later (child) rules win,
+// matching TextMate "later settings win". Chains are followed (cycle-guarded,
+// depth-capped); a missing target records a warning and stops the chain —
+// the partial palette still beats crashing.
+// ------------------------------------------------------------------
+function zipDirname(zipPath) {
+  const i = zipPath.lastIndexOf('/');
+  return i < 0 ? '' : zipPath.slice(0, i);
+}
+
+function zipJoin(base, inc) {
+  if (!inc || typeof inc !== 'string') return null;
+  if (inc.startsWith('/') || inc.includes('..\\')) {
+    // absolute or backslash-parent: not resolvable inside the package
+    return null;
+  }
+  return path.posix.normalize(path.posix.join(base || '', inc));
+}
+
+/**
+ * Resolve the full include chain of a theme object.
+ * @param {object} themeObj - parsed theme JSON (the child, from contributes.themes).
+ * @param {string} themePath - its zip entry path (e.g. "extension/themes/x.json").
+ * @param {(zipPath:string)=>object|null} readFile - async; parsed JSON object for a
+ *        zip entry, or null when the entry is absent/unparseable.
+ * @param {object} [opts] - { maxDepth = 8, warnings = [] }
+ * @returns {Promise<{merged:object, chain:Array, warnings:string[]}>} `merged`
+ *        has colors/tokenColors folded (child wins) with `include` stripped.
+ */
+export async function resolveIncludes(themeObj, themePath, readFile, opts = {}) {
+  const maxDepth = opts.maxDepth ?? 8;
+  const warnings = opts.warnings || [];
+  const seen = new Set([path.posix.normalize(themePath)]);
+  // chain[0] = child; walk up to the top-most base.
+  const chain = [{ path: themePath, theme: themeObj }];
+  let current = themeObj;
+  let currentPath = themePath;
+  while (current && typeof current.include === 'string' && chain.length <= maxDepth) {
+    const nextPath = zipJoin(zipDirname(currentPath), current.include);
+    if (nextPath === null) {
+      warnings.push('include path not resolvable inside package: ' + current.include + ' (in ' + currentPath + ')');
+      break;
+    }
+    if (seen.has(nextPath)) {
+      warnings.push('include cycle detected at ' + nextPath + '; stopping chain');
+      break;
+    }
+    seen.add(nextPath);
+    let base = null;
+    try { base = await readFile(nextPath); } catch { base = null; }
+    if (base === null || base === undefined || typeof base !== 'object') {
+      warnings.push('include target missing or unparseable in package: ' + nextPath);
+      break;
+    }
+    chain.push({ path: nextPath, theme: base });
+    current = base;
+    currentPath = nextPath;
+  }
+  if (chain.length > maxDepth) warnings.push('include chain deeper than ' + maxDepth + '; truncated');
+
+  // Fold: top-most base first, child last → child wins per key.
+  const merged = {};
+  const tokenColors = [];
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const t = chain[i].theme;
+    for (const [k, v] of Object.entries(t)) {
+      if (k === 'include') continue;
+      if (k === 'colors' && v && typeof v === 'object' && !Array.isArray(v)) {
+        merged.__colors = merged.__colors || {};
+        Object.assign(merged.__colors, v);
+      } else if (k === 'tokenColors' && Array.isArray(v)) {
+        tokenColors.push(...v);
+      } else if (k === 'semanticTokenColorRules' && Array.isArray(v)) {
+        merged.__sem = (merged.__sem || []).concat(v);
+      } else {
+        merged[k] = v; // scalars/other: later (child) wins
+      }
+    }
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(merged)) {
+    if (k === '__colors' || k === '__sem') continue;
+    out[k] = v;
+  }
+  if (merged.__colors) out.colors = merged.__colors;
+  if (tokenColors.length) out.tokenColors = tokenColors;
+  if (merged.__sem) out.semanticTokenColorRules = merged.__sem;
+  return { merged: out, chain, warnings };
 }
 
 // ------------------------------------------------------------------
@@ -240,6 +455,9 @@ function vsixUrl(publisher, name, version) {
 }
 
 // Download a theme extension and convert its first color theme to DSW tokens.
+// The theme's `include` inheritance chain is resolved first (base palettes are
+// read from the same already-downloaded .vsix), then tokenColors are mapped to
+// the nine --shiki-token-* variables alongside the 14 dsw aliases.
 // Returns { id, name, colorScheme, tokens, publisher, version }.
 export async function fetchThemeDefinition(ext) {
   const resp = await fetch(vsixUrl(ext.publisher, ext.name, ext.version));
@@ -252,13 +470,25 @@ export async function fetchThemeDefinition(ext) {
   if (!themes.length) throw new Error('extension provides no color theme');
   const themeEntry = themes[0];
   const themePath = 'extension/' + String(themeEntry.path).replace(/^\.?\/+/, '');
-  const themeJson = JSON.parse(stripJsonc(new TextDecoder().decode(await extractZipEntry(view, u8, entries, themePath))));
-  const mapped = mapToDswTokens(themeJson.colors || {}, themeEntry.uiTheme);
+  const readThemeJson = async (zipPath) =>
+    JSON.parse(stripJsonc(new TextDecoder().decode(await extractZipEntry(view, u8, entries, zipPath))));
+  let themeJson;
+  try {
+    themeJson = await readThemeJson(themePath);
+  } catch (err) {
+    throw new Error('theme file unreadable in package: ' + err.message);
+  }
+  // Follow the include chain; base files come from the same in-memory zip.
+  const { merged, warnings } = await resolveIncludes(themeJson, themePath, async (p) => {
+    try { return await readThemeJson(p); } catch { return null; }
+  });
+  for (const w of warnings) console.warn('[vscode-themes] ' + w);
+  const mapped = mapToDswTokens(merged.colors || {}, themeEntry.uiTheme);
   return {
     id: themeId(ext),
     name: themeEntry.label || ext.displayName || ext.name,
     colorScheme: mapped.colorScheme,
-    tokens: mapped.tokens,
+    tokens: { ...mapped.tokens, ...mapTokenColorsToShiki(merged).tokens },
     publisher: ext.publisher,
     version: ext.version,
   };
