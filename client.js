@@ -905,6 +905,7 @@ window.__ModuleLoader__.load({
                       'button',
                       {
                         className: 'vst-install-btn',
+                        style: themeButtonVars(tk),
                         disabled: isPending,
                         onClick: (e) => {
                           e.stopPropagation();
@@ -913,7 +914,7 @@ window.__ModuleLoader__.load({
                       },
                       t('market.install'),
                     )
-                  : removeButton(theme.id, t('uninstall.label')),
+                  : removeButton(theme.id, t('uninstall.label'), tk),
               ),
             );
           }
@@ -1006,13 +1007,32 @@ window.__ModuleLoader__.load({
             };
           }
 
-          function removeButton(id, label) {
+          // The card theme's palette exposed to the `.vst-*` button CSS as
+          // element-scoped custom properties, so the buttons (including their
+          // :hover states) render in the CARD's own colours instead of the
+          // currently-applied theme's — a plain `var(--dsw-alias-*)` in the
+          // stylesheet would resolve against the active theme, which clashes
+          // when the card's palette is very different. Missing tokens fall
+          // back to the defaults baked into the CSS rule.
+          function themeButtonVars(tokens) {
+            const tk = tokens || {};
+            return {
+              '--vst-tk-label2': tk['--dsw-alias-label-secondary'],
+              '--vst-tk-border': tk['--dsw-alias-border-l1'] || tk['--dsw-alias-border-l2'],
+              '--vst-tk-error': tk['--dsw-alias-state-error-primary'],
+              '--vst-tk-brand': tk['--dsw-alias-brand-primary'],
+              '--vst-tk-bg': tk['--dsw-alias-bg-base'],
+            };
+          }
+
+          function removeButton(id, label, tokens) {
             return h(
               'button',
               {
                 className: 'vst-remove-btn',
                 title: t('remove'),
                 'aria-label': t('remove'),
+                style: themeButtonVars(tokens),
                 onClick: (e) => {
                   e.stopPropagation();
                   removeTheme(id);
@@ -1046,7 +1066,7 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'vst-card-actions' },
                 isSelected ? activePill(theme.tokens) : null,
-                removeButton(theme.id, kind === 'bundled' ? t('remove.label') : t('uninstall.label')),
+                removeButton(theme.id, kind === 'bundled' ? t('remove.label') : t('uninstall.label'), theme.tokens),
               ),
             );
           }
@@ -1101,17 +1121,20 @@ window.__ModuleLoader__.load({
                   'background:linear-gradient(90deg,transparent,rgba(255,255,255,.14),transparent);' +
                   'animation:vst-shimmer 1.2s infinite;}' +
                   '@keyframes vst-shimmer{100%{transform:translateX(100%);}}' +
+                  // Button colours resolve the per-card `--vst-tk-*` custom
+                  // properties set inline by themeButtonVars() — the card's own
+                  // palette, not the applied theme's.
                   '.vst-remove-btn{font:inherit;font-size:11px;font-weight:500;line-height:1;padding:4px 9px;cursor:pointer;' +
-                  'color:var(--dsw-alias-label-secondary);background:transparent;' +
-                  'border:1px solid var(--dsw-alias-border-l2);border-radius:6px;}' +
-                  '.vst-remove-btn:hover{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary);}' +
+                  'color:var(--vst-tk-label2,#9aa4b2);background:transparent;' +
+                  'border:1px solid var(--vst-tk-border,#3a3f4b);border-radius:6px;}' +
+                  '.vst-remove-btn:hover{color:var(--vst-tk-error,#c24038);border-color:var(--vst-tk-error,#c24038);}' +
                   '.vst-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}' +
                   '.vst-state{font-size:12px;color:var(--dsw-alias-label-secondary);}' +
                   '.vst-state.is-selected{color:var(--dsw-alias-brand-primary);font-weight:600;}' +
                   '.vst-state-error{color:var(--dsw-alias-state-error-primary);}' +
                   '.vst-install-btn{font:inherit;font-size:12px;font-weight:600;padding:4px 12px;cursor:pointer;' +
-                  'color:var(--dsw-alias-bg-base);background:var(--dsw-alias-brand-primary);' +
-                  'border:1px solid var(--dsw-alias-brand-primary);border-radius:6px;}' +
+                  'color:var(--vst-tk-bg,#14151a);background:var(--vst-tk-brand,#4d78cc);' +
+                  'border:1px solid var(--vst-tk-brand,#4d78cc);border-radius:6px;}' +
                   '.vst-install-btn:hover{filter:brightness(1.1);}' +
                   '.vst-install-btn.is-disabled{opacity:.5;cursor:default;filter:none;}' +
                   '.vst-empty{padding:32px;text-align:center;color:var(--dsw-alias-label-secondary);font-size:14px;}',

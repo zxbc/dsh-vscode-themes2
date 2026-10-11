@@ -192,6 +192,37 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-11 (UX: card buttons obey the card's own theme)** — User-reported nitpick:
+  the "Uninstall" button outline on each card rendered in the *applied* theme's
+  palette, not the card's — jarring when the two palettes clash. The same clash
+  existed on the marketplace "Install" button; both fixed.
+  - **Fix (client.js only):** new `themeButtonVars(tokens)` helper exposes the card
+    theme's palette as element-scoped CSS custom properties (`--vst-tk-label2`,
+    `--vst-tk-border`, `--vst-tk-error`, `--vst-tk-brand`, `--vst-tk-bg`), set inline
+    on the button. The `.vst-remove-btn` / `.vst-install-btn` rules (incl. the
+    `:hover` states, which previously resolved `--dsw-alias-*` against the applied
+    theme) now reference those per-element vars with baked-in fallbacks. This is the
+    same inline-binding rationale as the card surface/sample/pill/ring: a plain
+    stylesheet `var(--dsw-alias-*)` resolves against the *applied* theme, not the
+    card's. `removeButton(id, label)` gained a `tokens` param; call sites pass
+    `tk` (marketCard) / `theme.tokens` (installed+bundled cards), and the install
+    button gets `style: themeButtonVars(tk)` (null `def` before the background
+    fetch lands → CSS fallbacks). Install hover already used the palette-agnostic
+    `filter:brightness(1.1)` and is unchanged.
+  - **Verified with the extended DOM harness:** pre-seed installed "One Dark"
+    (brand #61afef / border #3a3f4b / label2 #9aa4b2), search "dark", then apply a
+    bundled theme with a clearly different palette (One Dark Pro: #4d78cc /
+    #3e4452 / #abb2bf). Post-switch invariants all PASS: every card's remove-button
+    border == its own card border (15 installed + market "One Dark"), and the
+    market "Dark Plus" install button's background == its own brand colour and its
+    text colour == its own bg-base. Pill regression (stays on the applied theme
+    after close+reopen) still passes; zero console errors; `node --check` clean.
+  - **Harness gotcha (not a plugin bug):** a bare `input.value = 'x'` on the
+    controlled search field is reverted by React on the next render, so the 1 s
+    poller saw '' on its following tick and cleared the search again — the harness
+    must type via the native value setter + dispatched `input` event (React's
+    onChange path) so the value prop tracks it.
+  - Live: client-HMR rebuilt the bundle (rev 15791e3c5ca8 → c45cd3a87b7d).
 - **2026-10-11 (UX: Active pill lost after closing/reopening the settings panel)** —
   User-reported kink: the "Active" pill appeared correctly right after clicking a
   theme card, but after closing the settings panel and reopening it, the currently
