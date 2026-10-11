@@ -422,7 +422,16 @@ export function themeId(ext) {
   return 'vscode-' + String(ext.publisher).toLowerCase() + '-' + String(ext.name).toLowerCase();
 }
 
-/** Search the VS Code Marketplace for theme extensions. */
+/**
+ * Search the VS Code Marketplace for theme extensions, sorted by popularity.
+ *
+ * Two quirks, verified empirically: the API ignores `Sort` request fields and
+ * returns up to 1000 items per page regardless of `size`, so ordering happens
+ * here. The request carries `flags: 511` (255 | 0x100 — the 0x100 bit switches
+ * on the per-extension `statistics` array), from which we take `install`
+ * (all-time installs) and `averagerating` (the star rating the Marketplace UI
+ * shows), then sort: installs desc → average rating desc → display name asc.
+ */
 export async function searchMarketplace(query) {
   const criteria = [{ filterType: 5, value: 'Themes' }];
   if (query) criteria.push({ filterType: 10, value: query });
@@ -432,11 +441,12 @@ export async function searchMarketplace(query) {
     body: JSON.stringify({
       filters: [{ criteria, page: 1, size: MAX_RESULTS }],
       assetTypes: [],
-      flags: 255,
+      flags: 511, // 255 | 0x100: include per-extension statistics
     }),
   });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = await resp.json();
+  const stat = (e, name) => (e.statistics || []).find((s) => s.statisticName === name)?.value;
   return (data.results || [])
     .flatMap((r) => r.extensions || [])
     .map((e) => ({
@@ -445,8 +455,12 @@ export async function searchMarketplace(query) {
       displayName: e.displayName,
       version: e.versions && e.versions[0] && e.versions[0].version,
       description: e.shortDescription || '',
+      installs: stat(e, 'install') ?? 0,
+      averageRating: stat(e, 'averagerating') ?? 0,
     }))
-    .filter((e) => e.publisher && e.name && e.version);
+    .filter((e) => e.publisher && e.name && e.version)
+    .sort((a, b) => (b.installs - a.installs) || (b.averageRating - a.averageRating) ||
+      (a.displayName || '').localeCompare(b.displayName || ''));
 }
 
 function vsixUrl(publisher, name, version) {

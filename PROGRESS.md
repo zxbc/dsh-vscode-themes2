@@ -192,6 +192,30 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-11 (UX: stale errors + popularity sort)** — Two follow-ups:
+  - **Stale error cleared by any successful action.** `marketError` (rendered in
+    the slot under the "Marketplace" heading) was only ever set, never cleared on
+    success — so a failed apply/preview kept its red error on screen forever until
+    the next search. Now `setMarketError('')` runs on every successful apply
+    (`selectTheme`), preview (`previewTheme`) and install (`installTheme`), so the
+    error always reflects the most recent action only.
+  - **Marketplace results sorted by popularity.** Verified first: the API request
+    sent no `Sort` and the API *ignores* `Sort` fields anyway (tested
+    `Sort=DownloadCount` / `Sort=AvgRating` — identical order); the default order
+    is relevance-ish and buries popular themes (e.g. a 79k-install theme ranked #2
+    above a 7.3M-install one). Also discovered: `flags: 255` omits popularity data,
+    while the **0x100 bit (flags 511)** switches on the per-extension `statistics`
+    array (`install`, `averagerating`, `ratingcount`, `trending*`,
+    `downloadCount`, ...). `searchMarketplace` now sends `flags: 511`, adds
+    `installs` + `averageRating` to each result, and sorts installs desc → rating
+    desc → display name asc (host-side, client untouched). E2E: "dark" now leads
+    with One Dark Pro (12.8M) / Atom One Dark (7.3M) / Nomo Dark (1.2M); "light"
+    with Monokai Pro (4.1M) / Winter is Coming (3.8M). Order-check PASS on both.
+  - Note: the API also ignores `size` and returns up to 1000 items per search
+    (pre-existing behaviour; popularity sort now puts the good ones first — capping
+    the result count is a possible follow-up if the user wants it).
+  - Live: client.js rebuilt by client-HMR (bundle rev b816cd2409a6 →
+    78cb79fa30b5); marketplace.js hot-swapped via the host partialReload.
 - **2026-10-11** — Ported the include-inheritance + shiki tokenColors prototype into
   the real plugin (host-side `marketplace.js` only; `client.js`, `index.js` and the
   `{id,name,colorScheme,tokens,publisher,version}` return contract unchanged):
