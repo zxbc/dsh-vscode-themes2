@@ -1,6 +1,7 @@
 {
   "name": "@local/dsh-vscode-themes2",
   "version": "1.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./index.js",

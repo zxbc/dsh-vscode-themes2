@@ -1,16 +1,20 @@
 # dsh-vscode-themes2 — Project Knowledge & Progress
 
 A VS Code theme switcher plugin for the DeepSeek Harness (DSH) Web UI.
-**This is a private dev repo — only agents and its author work on it; no release
-process.** Update this file at the end of every working session so future sessions
-can resume from here.
+**The repo is PUBLIC (github.com/zxbc/dsh-vscode-themes2) and is being prepared for
+submission to the DSH Plugin Hub (dsh-plugin.org) — this file is the agent-maintained
+development log, not release material.** Update this file at the end of every working
+session so future sessions can resume from here.
 
 ## Current status — 2026-10-11
 
 **State: FULLY WORKING — user-verified, everything pushed (repo PUBLIC:
 https://github.com/zxbc/dsh-vscode-themes2). `origin/main` is up to date with
-local `main` (latest commit d9f1b51). Since the original four fixes (commit
-94cc366): a **lean/compact redesign** (smaller rendered previews, one consolidated
+local `main`. **Hub submission (dsh-plugin.org) — Phase 1 done:** MIT LICENSE +
+`"license"` field, public README (install command, screenshots, permissions,
+compatibility), all three gallery screenshots committed under `screenshots/`; the full
+plan lives in untracked `SUBMISSION_PLAN.md`, remaining phases (GitHub topic,
+submission issue) await user review. Since the original four fixes (commit 94cc366): a **lean/compact redesign** (smaller rendered previews, one consolidated
 search with Installed + Marketplace sections, a prominent ring+pill "Active"
 indicator, dropped the redundant colour-scheme badge) plus a **card-accuracy pass**
 (each card's background/border/title bound to that theme's OWN tokens) in
@@ -193,6 +197,29 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-11 (Hub submission: repo prep, Phase 1)** — User approved the
+  dsh-plugin.org submission plan (see untracked `SUBMISSION_PLAN.md`): **MIT**
+  license, category **UI & Experience**, commit **all three** screenshots. Executed
+  Phase 1 (repo prep):
+  - Added `LICENSE` (MIT, © 2026 zxbc) and `"license": "MIT"` in package.json (kept
+    `"private": true` — inert for git-spec installs, conservative choice).
+  - Moved the gallery screenshots into `screenshots/` with public names:
+    `theme-gallery.png` (1280×800, current — Remove action + Active pill),
+    `theme-gallery-v2.png` (2240×1800, Apply/Remove pills), `theme-gallery-v1.png`
+    (2240×1800, Apply/× text buttons).
+  - Rewrote `README.md` as public release material: one-line value, category/license/
+    compatibility line, hero + iteration screenshots with captions, the public install
+    command `dsh plugin --profile web add github:zxbc/dsh-vscode-themes2` (verified
+    working in a scratch profile), local-path install, trimmed dev internals (protocol
+    facts live here), Permissions & external services, Compatibility (DSH
+    0.2.1-alpha.1; Node 18+ host half), file table incl. LICENSE/screenshots. Fixed
+    the "private dev repo" wording here and in this file's header.
+  - Fact-check while writing: the bundled catalog is **14** themes (re-counted in
+    `client.js`) — the plan draft's "18 bundled" was wrong; corrected in
+    SUBMISSION_PLAN.md.
+  - Committed + pushed (Phase 1). Remaining: **Phase 2** GitHub topic `dsh-plugin`
+    via API, **Phase 3** submission issue in `dshplugin/dsh-plugin-hub` — both only
+    after the user reviews SUBMISSION_PLAN.md.
 - **2026-10-11 (UX: card buttons obey the card's own theme)** — User-reported nitpick:
   the "Uninstall" button outline on each card rendered in the *applied* theme's
   palette, not the card's — jarring when the two palettes clash. The same clash
