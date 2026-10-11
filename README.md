@@ -29,18 +29,10 @@ Web UI — one click re-skins the whole interface live, in that theme's own pale
 
 ## Screenshots
 
-**Current gallery** — each card previews its theme live (sample text, semantic chips,
-accent button); the applied card carries the blue Active ring + pill:
+Each card previews its theme live (sample text, semantic chips, accent button); the
+applied card carries the blue Active ring + pill:
 
-![Theme gallery — current](screenshots/theme-gallery.png)
-
-**Earlier iteration** — pill-style Apply / Remove actions:
-
-![Theme gallery — earlier iteration](screenshots/theme-gallery-v2.png)
-
-**Earliest iteration** — text-style Apply action with a close button:
-
-![Theme gallery — earliest iteration](screenshots/theme-gallery-v1.png)
+![Theme gallery](screenshots/theme-gallery.png)
 
 ## Install
 
@@ -115,7 +107,7 @@ It is agent-maintained — read it before changing `client.js` or `marketplace.j
 | `cordis.patch.yml` | Inserts the `vscode-themes2` entry into the profile tree. |
 | `locale/en.json` | Display title/description for the Plugin Manager. |
 | `icon.svg` | Plugin icon. |
-| `screenshots/` | Gallery screenshots embedded in this README. |
+| `screenshots/` | Gallery screenshot embedded in this README. |
 | `PROGRESS.md` | Development log & session notes. |
 
 ## License
