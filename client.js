@@ -602,7 +602,15 @@ window.__ModuleLoader__.load({
 
         function ThemeBrowser() {
           const [query, setQuery] = React.useState('');
-          const [selected, setSelected] = React.useState(selectedId);
+          // Re-read localStorage on EVERY mount (lazy initializer), the same
+          // pattern as `installedList` below: the `selectedId` closure variable
+          // is captured once at apply() time and goes stale after an in-session
+          // switch, so remounting the section (settings panel closed and
+          // reopened) would show the Active pill on the theme that was selected
+          // when the plugin first activated, not the one actually applied.
+          const [selected, setSelected] = React.useState(() => {
+            try { return localStorage.getItem(STORAGE_KEY) || selectedId; } catch (_) { return selectedId; }
+          });
           // Re-read localStorage on EVERY mount (lazy initializer). The `installed`
           // closure variable is captured once at apply() time and is stale after an
           // install — initializing from it is why installed themes vanished when the

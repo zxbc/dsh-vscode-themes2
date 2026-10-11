@@ -192,6 +192,27 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-11 (UX: Active pill lost after closing/reopening the settings panel)** —
+  User-reported kink: the "Active" pill appeared correctly right after clicking a
+  theme card, but after closing the settings panel and reopening it, the currently
+  applied theme no longer showed as active.
+  - **Root cause:** `selected` (React state) was initialised from the `selectedId`
+    closure variable, which `apply()` reads from localStorage exactly ONCE at plugin
+    activation. Closing/reopening the section remounts `ThemeBrowser` WITHOUT
+    re-running `apply()` (same shape as the earlier stale-`installed` bug fixed with
+    a lazy initializer for `installedList`), so the pill re-anchored to whichever
+    theme was selected at activation — or vanished if that theme was since removed.
+  - **Fix:** `selected` now uses a lazy `useState` initializer that re-reads
+    `STORAGE_KEY` (`dsh.vscodeThemes.selected`, kept in sync by `persistSelected` on
+    every apply/preview/install) on every mount, falling back to `selectedId` only
+    if localStorage is unavailable. One change in `client.js`; no host changes.
+  - **Verified with a DOM harness** (React 18 UMD + the real `client.js`, stubbed
+    ctx/remote, Playwright): pre-seed an installed theme as the selection → click a
+    different card → unmount/remount (close+reopen). BEFORE: pill reverted to the
+    pre-seeded theme while `persisted`/`activeTheme` correctly tracked the clicked
+    one; AFTER: pill follows the persisted selection across remounts. Zero console
+    errors; `node --check` clean.
+  - Live: client-HMR rebuilt the bundle (rev 78cb79fa30b5 → 15791e3c5ca8).
 - **2026-10-11 (UX: stale errors + popularity sort)** — Two follow-ups:
   - **Stale error cleared by any successful action.** `marketError` (rendered in
     the slot under the "Marketplace" heading) was only ever set, never cleared on
