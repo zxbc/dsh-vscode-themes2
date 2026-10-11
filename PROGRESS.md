@@ -7,18 +7,19 @@ can resume from here.
 
 ## Current status — 2026-10-11
 
-**State: FULLY WORKING + lean-design pass + card-accuracy pass + include-inheritance &
-shiki tokenColors mapping (2026-10-11, host `marketplace.js` only; local commit, NOT
-pushed — user verifies first). The four
-fixes are pushed (commit 94cc366) and the repo is PUBLIC:
-https://github.com/zxbc/dsh-vscode-themes2. On top of that, a **lean/compact redesign**
-(smaller rendered previews, one consolidated search with Installed + Marketplace
-sections, a prominent ring+pill "Active" indicator, dropped the redundant colour-scheme
-badge) plus a **card-accuracy pass** (each card's background/border/title now bound to
-that theme's OWN tokens, the "Apply" text dropped, and the count line now reads
-"N themes installed · click on a theme card to preview/apply") are done in `client.js`
-only and **delivered locally for the user to test — do NOT push yet.** See the 2026-10-10
-(lean design) and (card-accuracy) entries in the session log.**
+**State: FULLY WORKING — user-verified, everything pushed (repo PUBLIC:
+https://github.com/zxbc/dsh-vscode-themes2). `origin/main` is up to date with
+local `main` (latest commit d9f1b51). Since the original four fixes (commit
+94cc366): a **lean/compact redesign** (smaller rendered previews, one consolidated
+search with Installed + Marketplace sections, a prominent ring+pill "Active"
+indicator, dropped the redundant colour-scheme badge) plus a **card-accuracy pass**
+(each card's background/border/title bound to that theme's OWN tokens) in
+`client.js`; **include-inheritance & shiki tokenColors mapping** in host
+`marketplace.js`; **popularity sort + stale-error clearing**; **Active pill restored
+across settings-panel close/reopen** (lazy localStorage re-read on every mount); and
+**card Install/Uninstall buttons bound to the card's own theme** (element-scoped
+`--vst-tk-*` custom properties, incl. hover states). See the 2026-10-10 and
+2026-10-11 entries in the session log.**
 
 - Marketplace search: uncontrolled input polled every 1 s with change detection —
   no per-keystroke queries.
