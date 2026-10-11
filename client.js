@@ -750,6 +750,7 @@ window.__ModuleLoader__.load({
             persistSelected(id);
             try { ctx.theme.setTheme(id); } catch (_) {}
             setSelected(id);
+            setMarketError(''); // a successful apply clears the previous action's error
           }
 
           // Fetch a marketplace theme's full definition (tokens), cached so
@@ -783,6 +784,7 @@ window.__ModuleLoader__.load({
               persistSelected(def.id);
               try { ctx.theme.setTheme(def.id); } catch (_) {}
               setSelected(def.id);
+              setMarketError(''); // a working preview clears the previous error
             } catch (err) {
               setMarketError(String(err && err.message || err));
             } finally {
@@ -813,6 +815,7 @@ window.__ModuleLoader__.load({
                 saveRemoved([...nextRemoved]);
                 setRemovedIds(nextRemoved);
               }
+              setMarketError(''); // a successful install clears the previous error
             } catch (err) {
               setMarketError(String(err && err.message || err));
             } finally {
