@@ -29,8 +29,9 @@ Web UI — one click re-skins the whole interface live, in that theme's own pale
 
 ## Screenshots
 
+The panel in a real browser, with marketplace themes installed (30 installed above).
 Each card previews its theme live (sample text, semantic chips, accent button); the
-applied card carries the blue Active ring + pill:
+applied card carries the Active ring + pill in its own accent colour:
 
 ![Theme gallery](screenshots/theme-gallery.png)
 
