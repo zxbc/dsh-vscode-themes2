@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-vscode-themes2",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -10,9 +10,10 @@
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
-    "./marketplace.js": "./marketplace.js"
+    "./marketplace.js": "./marketplace.js",
+    "./update.js": "./update.js"
   },
-  "files": ["index.js", "client.js", "marketplace.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
+  "files": ["index.js", "client.js", "marketplace.js", "update.js", "cordis.patch.yml", "locale/*.json", "icon.svg"],
   "dependencies": {},
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },

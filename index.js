@@ -12,7 +12,10 @@
 // is one shared object across the whole Cordis context tree, a service provided
 // by this plugin fiber is visible to the Gateway regardless of tree position.
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { searchMarketplace, fetchThemeDefinition } from "./marketplace.js";
+import { checkUpdate, applyUpdate } from "./update.js";
 
 var __runInitializers = function(thisArg, initializers, value) {
 	var useValue = arguments.length > 2;
@@ -58,11 +61,15 @@ let VscodeThemes = (() => {
 	let _instanceExtraInitializers = [];
 	let _search_decorators;
 	let _fetchTheme_decorators;
+	let _checkUpdate_decorators;
+	let _applyUpdate_decorators;
 	return class VscodeThemes extends _classSuper {
 		static {
 			const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
 			_search_decorators = [Remote];
 			_fetchTheme_decorators = [Remote];
+			_checkUpdate_decorators = [Remote];
+			_applyUpdate_decorators = [Remote];
 			__esDecorate(this, null, _search_decorators, {
 				kind: "method",
 				name: "search",
@@ -85,6 +92,28 @@ let VscodeThemes = (() => {
 				},
 				metadata: _metadata
 			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _checkUpdate_decorators, {
+				kind: "method",
+				name: "checkUpdate",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "checkUpdate" in obj,
+					get: (obj) => obj.checkUpdate
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _applyUpdate_decorators, {
+				kind: "method",
+				name: "applyUpdate",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "applyUpdate" in obj,
+					get: (obj) => obj.applyUpdate
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
 			if (_metadata) Object.defineProperty(this, Symbol.metadata, {
 				enumerable: true,
 				configurable: true,
@@ -96,6 +125,9 @@ let VscodeThemes = (() => {
 		constructor(ctx, config) {
 			super(ctx, "vscodeThemes");
 			this.config = config;
+			// The plugin is installed as a symlink onto its source checkout; the
+			// resolved (realpath) directory is what the update logic pulls into.
+			this.pluginDir = path.dirname(fileURLToPath(import.meta.url));
 		}
 		/** Search the VS Code Marketplace for themes matching a query. */
 		async search(query) {
@@ -104,6 +136,14 @@ let VscodeThemes = (() => {
 		/** Download and parse one extension's theme definition into DSW tokens. */
 		async fetchTheme(ext) {
 			return fetchThemeDefinition(ext);
+		}
+		/** Compare the installed version against the live GitHub repo. */
+		async checkUpdate() {
+			return checkUpdate(this.pluginDir);
+		}
+		/** Install the latest version from the live GitHub repo. */
+		async applyUpdate() {
+			return applyUpdate(this.pluginDir);
 		}
 	};
 })();
