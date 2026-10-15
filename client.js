@@ -32,6 +32,21 @@ window.__ModuleLoader__.load({
       const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
       return luminance > 0.62 ? '#111318' : '#ffffff';
     }
+    // Legible text colour for the applied theme's brand colour, read live from
+    // the CSS custom property so the Update button stays readable on any theme.
+    function onBrandColor() {
+      try {
+        // The DSW tokens are scoped to <body>, not <html> — check both.
+        for (const root of [document.body, document.documentElement]) {
+          const brand = getComputedStyle(root)
+            .getPropertyValue('--dsw-alias-brand-primary').trim();
+          if (brand) return contrastOn(brand);
+        }
+        return contrastOn('#4d78cc');
+      } catch (_) {
+        return '#ffffff';
+      }
+    }
     // Return `color` with an explicit alpha (hex → 8-digit, rgb → rgba).
     function withAlpha(color, alpha) {
       if (!color) return 'transparent';
@@ -64,6 +79,7 @@ window.__ModuleLoader__.load({
     // not require a zod instance for hand-written contributions — so we use a
     // pass-through schema and avoid importing zod into the client bundle.
     const PKG = '@local/dsh-vscode-themes2';
+    const REPO_URL = 'https://github.com/zxbc/dsh-vscode-themes2';
     const PASS_THROUGH = { parse: (v) => v };
     const codec = (typeSymbol) => ({ mode: 'strict', typeSymbol, create: () => PASS_THROUGH });
     const MARKETPLACE_CONTRIBUTION = {
@@ -90,6 +106,26 @@ window.__ModuleLoader__.load({
             { name: 'ext', wire: 'ext', source: 'json', codec: codec(PKG + '#vscodeThemes/fetchTheme:ext') },
           ],
           result: codec(PKG + '#vscodeThemes/fetchTheme:result'),
+        },
+        // Update feature: no-parameter methods, so the self-mount needs no strict
+        // parameter codecs — results pass through as plain JSON.
+        {
+          id: PKG + '#vscodeThemes/checkUpdate',
+          service: 'vscodeThemes',
+          namespace: 'vscodeThemes',
+          method: 'checkUpdate',
+          invocation: { kind: 'direct' },
+          parameters: [],
+          result: codec(PKG + '#vscodeThemes/checkUpdate:result'),
+        },
+        {
+          id: PKG + '#vscodeThemes/applyUpdate',
+          service: 'vscodeThemes',
+          namespace: 'vscodeThemes',
+          method: 'applyUpdate',
+          invocation: { kind: 'direct' },
+          parameters: [],
+          result: codec(PKG + '#vscodeThemes/applyUpdate:result'),
         },
       ],
     };
@@ -466,6 +502,33 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ------------------------------------------------------------------
+    // Favorites: themes the user starred. A starred theme gets a filled star
+    // on its card and is listed at the front of the grid. Persisted to
+    // localStorage like the installed list.
+    // ------------------------------------------------------------------
+    const FAVORITES_KEY = 'dsh.vscodeThemes.favorites';
+
+    function loadFavorites() {
+      try {
+        const raw = localStorage.getItem(FAVORITES_KEY);
+        if (!raw) return [];
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) return [];
+        return list.filter((x) => typeof x === 'string' && x);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveFavorites(list) {
+      try {
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(list));
+      } catch (err) {
+        console.error('vscode-themes saveFavorites failed', err);
+      }
+    }
+
     const NS = 'vscode-themes';
     const ENTRY_ID = 'vscode-themes';
 
@@ -512,7 +575,16 @@ window.__ModuleLoader__.load({
           'market.minChars': 'Type at least 2 characters to search.',
           'remove': 'Remove this theme',
           'remove.label': 'Remove',
+          'favorite': 'Favorite this theme',
+          'unfavorite': 'Remove favorite',
           'uninstall.label': 'Uninstall',
+          'update.available': 'Update available: {version}',
+          'update.upToDate': 'Up to date',
+          'update.now': 'Update',
+          'update.updating': 'Updating…',
+          'update.success': 'Updated to {version}',
+          'update.error': 'Update failed: {error}',
+          'github.link': 'GitHub',
         });
 
         const themeDisposers = [];
@@ -588,6 +660,23 @@ window.__ModuleLoader__.load({
         const marketAvailable = unmountMarketplace !== null;
         const marketMountError = marketplaceError;
 
+        // Update check on every plugin load: compare the installed version
+        // against the live GitHub repo. A failure only hides the update UI; it
+        // must never break the section. `updateInfo` is a closure `let` so the
+        // update handler can refresh it and force a re-render via updateTick.
+        let updateInfo = { local: '', latest: '', hasUpdate: false, repoUrl: REPO_URL, error: '' };
+        try {
+          const ns = ctx.get('remote.vscodeThemes');
+          if (!ns) updateInfo.error = 'update namespace is not mounted';
+          else {
+            const res = await ns.checkUpdate();
+            if (res.ok) updateInfo = { ...res.value, error: '' };
+            else updateInfo.error = String(res.error && res.error.message || res.error);
+          }
+        } catch (err) {
+          updateInfo.error = String(err && err.message || err);
+        }
+
         function persistSelected(id) {
           // Update the re-assertion tracker FIRST, before the caller applies the
           // theme, so the boot-race re-assertion never reverts a fresh switch.
@@ -617,6 +706,17 @@ window.__ModuleLoader__.load({
           // settings section was closed and reopened.
           const [installedList, setInstalledList] = React.useState(() => loadInstalled());
           const [removedIds, setRemovedIds] = React.useState(() => new Set(loadRemoved()));
+          // Starred themes, re-read from localStorage on every mount (same
+          // pattern as installedList) so reopening the section restores stars.
+          const [favoriteIds, setFavoriteIds] = React.useState(() => new Set(loadFavorites()));
+
+          function toggleFavorite(id) {
+            const next = new Set(favoriteIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            saveFavorites([...next]);
+            setFavoriteIds(next);
+          }
 
           // Marketplace state (only active when the Remote mount succeeded).
           const [marketQuery, setMarketQuery] = React.useState('');
@@ -633,6 +733,29 @@ window.__ModuleLoader__.load({
           const marketInputRef = React.useRef(null);
           const marketSeenRef = React.useRef('');
           const searchTokenRef = React.useRef(0);
+
+          // Update-feature UI state. `updateAction` drives the button label and
+          // the success/failure line; `updateTick` forces a re-render after the
+          // closure `updateInfo` is refreshed by runUpdate().
+          const [updateAction, setUpdateAction] = React.useState({ phase: 'idle', message: '' });
+          const [updateTick, setUpdateTick] = React.useState(0);
+
+          async function runUpdate() {
+            setUpdateAction({ phase: 'updating', message: '' });
+            try {
+              const ns = ctx.get('remote.vscodeThemes');
+              if (!ns) throw new Error('update namespace is not mounted');
+              const res = await ns.applyUpdate();
+              if (!res.ok) throw new Error(String(res.error && res.error.message || res.error));
+              // Re-check so the "update available" alert reflects the fresh version.
+              const chk = await ns.checkUpdate();
+              if (chk.ok) updateInfo = { ...chk.value, error: '' };
+              setUpdateTick((x) => x + 1);
+              setUpdateAction({ phase: 'success', message: t('update.success', { version: res.value.version }) });
+            } catch (err) {
+              setUpdateAction({ phase: 'error', message: t('update.error', { error: String(err && err.message || err) }) });
+            }
+          }
 
           async function runSearch(mq) {
             // Token invalidates any in-flight search when a newer one starts.
@@ -747,7 +870,10 @@ window.__ModuleLoader__.load({
             if (removedIds.has(th.id) || seenIds.has(th.id)) return false;
             seenIds.add(th.id);
             return !q || th.name.toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
-          });
+          })
+          // Starred themes float to the front; sort is stable, so the
+          // installed-then-bundled order is kept within each group.
+          .sort((a, b) => Number(favoriteIds.has(b.id)) - Number(favoriteIds.has(a.id)));
 
           function selectTheme(id) {
             if (id === selected) return;
@@ -1042,8 +1168,28 @@ window.__ModuleLoader__.load({
             );
           }
 
+          // Star glyph for the favorite toggle: outline when not starred,
+          // filled when starred. Sized for the card-top row.
+          function starIcon(filled) {
+            return h(
+              'svg',
+              {
+                viewBox: '0 0 24 24',
+                width: 14,
+                height: 14,
+                'aria-hidden': true,
+                fill: filled ? 'currentColor' : 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.8,
+                strokeLinejoin: 'round',
+              },
+              h('path', { d: 'M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.58L12 17.57l-5.9 3.1 1.13-6.58L2.45 9.44l6.6-.96L12 2.5z' }),
+            );
+          }
+
           function card(theme, kind) {
             const isSelected = theme.id === selected;
+            const isFav = favoriteIds.has(theme.id);
             const tk = theme.tokens || {};
             return h(
               'div',
@@ -1060,6 +1206,20 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'vst-card-top' },
                 h('span', { className: 'vst-name', style: { color: tk['--dsw-alias-label-primary'] } }, theme.name || theme.displayName),
+                h(
+                  'button',
+                  {
+                    className: 'vst-fav-star' + (isFav ? ' is-fav' : ''),
+                    title: isFav ? t('unfavorite') : t('favorite'),
+                    'aria-label': isFav ? t('unfavorite') : t('favorite'),
+                    onClick: (e) => {
+                      // Star toggle must not also select/apply the theme.
+                      e.stopPropagation();
+                      toggleFavorite(theme.id);
+                    },
+                  },
+                  starIcon(isFav),
+                ),
               ),
               themeSample(theme),
               h(
@@ -1078,7 +1238,21 @@ window.__ModuleLoader__.load({
               dangerouslySetInnerHTML: {
                 __html:
                   '.vst-root{display:flex;flex-direction:column;gap:16px;padding:20px 24px;}' +
-                  '.vst-header{display:flex;flex-direction:column;gap:4px;}' +
+                  '.vst-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;}' +
+                   '.vst-header-left{display:flex;flex-direction:column;gap:4px;min-width:0;}' +
+                   '.vst-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;flex-shrink:0;}' +
+                   '.vst-update-alert{font-size:12px;color:var(--dsw-alias-state-warn-primary);white-space:nowrap;}' +
+                   '.vst-update-dim{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;}' +
+                   '.vst-update-success{font-size:12px;color:var(--dsw-alias-state-success-primary);}' +
+                   '.vst-update-fail{font-size:12px;color:var(--dsw-alias-state-error-primary);}' +
+                   '.vst-update-btn{font:inherit;font-size:12px;font-weight:600;line-height:1;padding:6px 12px;cursor:pointer;' +
+                   'color:#fff;background:var(--dsw-alias-brand-primary);border:1px solid var(--dsw-alias-brand-primary);border-radius:6px;}' +
+                   '.vst-update-btn:hover{filter:brightness(1.1);}' +
+                   '.vst-update-btn:disabled{opacity:.6;cursor:default;filter:none;}' +
+                   '.vst-github-link{font:inherit;font-size:12px;font-weight:600;line-height:1;padding:6px 10px;text-decoration:none;' +
+                   'color:var(--dsw-alias-label-secondary);background:transparent;border:1px solid var(--dsw-alias-border-l1);' +
+                   'border-radius:6px;white-space:nowrap;}' +
+                   '.vst-github-link:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-secondary);}' +
                   '.vst-title{margin:0;font-size:18px;font-weight:600;color:var(--dsw-alias-label-primary);}' +
                   '.vst-subtitle{margin:0;font-size:13px;color:var(--dsw-alias-label-secondary);}' +
                   '.vst-search{width:100%;max-width:520px;box-sizing:border-box;padding:8px 12px;font-size:14px;' +
@@ -1104,6 +1278,13 @@ window.__ModuleLoader__.load({
                   '.vst-card.is-disabled{opacity:.6;}' +
                   '.vst-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
                   '.vst-name{font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+                   // Favorite star: top-right of the card, outline by default,
+                   // gold-filled when starred.
+                   '.vst-fav-star{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex-shrink:0;cursor:pointer;padding:0;' +
+                   'color:var(--dsw-alias-label-secondary);background:transparent;border:1px solid var(--dsw-alias-border-l2);' +
+                   'border-radius:6px;transition:color .12s,border-color .12s,background .12s;}' +
+                   '.vst-fav-star:hover{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);}' +
+                   '.vst-fav-star.is-fav{color:#f5c518;border-color:#f5c518;background:rgba(245,197,24,.12);}' +
                    '.vst-sample{display:flex;flex-direction:column;gap:3px;padding:0;border-radius:7px;' +
                    'overflow:hidden;}' +
                    '.vst-sample-msg{max-width:88%;padding:4px 7px;border-radius:7px;font-size:10px;line-height:1.3;}' +
@@ -1143,8 +1324,49 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'vst-header' },
-              h('h2', { className: 'vst-title' }, t('section.title')),
-              h('p', { className: 'vst-subtitle' }, t('count', { n: localThemes.length }) + '   ·   ' + t('apply.hint')),
+              h(
+                'div',
+                { className: 'vst-header-left' },
+                h('h2', { className: 'vst-title' }, t('section.title')),
+                h('p', { className: 'vst-subtitle' }, t('count', { n: localThemes.length }) + '   ·   ' + t('apply.hint')),
+              ),
+              h(
+                'div',
+                { className: 'vst-header-actions', 'data-tick': updateTick },
+                updateInfo.hasUpdate
+                  ? h('span', { className: 'vst-update-alert' }, t('update.available', { version: updateInfo.latest }))
+                  : !updateInfo.error && updateInfo.local
+                    ? h('span', { className: 'vst-update-dim' }, t('update.upToDate'))
+                    : null,
+                updateAction.phase === 'success'
+                  ? h('span', { className: 'vst-update-success' }, updateAction.message)
+                  : updateAction.phase === 'error'
+                    ? h('span', { className: 'vst-update-fail' }, updateAction.message)
+                    : null,
+                updateInfo.hasUpdate
+                  ? h(
+                      'button',
+                      {
+                        className: 'vst-update-btn',
+                        style: { color: onBrandColor() },
+                        disabled: updateAction.phase === 'updating',
+                        onClick: runUpdate,
+                      },
+                      updateAction.phase === 'updating' ? t('update.updating') : t('update.now'),
+                    )
+                  : null,
+                h(
+                  'a',
+                  {
+                    className: 'vst-github-link',
+                    href: updateInfo.repoUrl || REPO_URL,
+                    target: '_blank',
+                    rel: 'noreferrer noopener',
+                    title: 'View the source on GitHub',
+                  },
+                  t('github.link') + ' \u2197',
+                ),
+              ),
             ),
             h('input', {
               className: 'vst-search',
