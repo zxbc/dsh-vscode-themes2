@@ -40,7 +40,7 @@ applied card carries the Active ring + pill in its own accent colour:
 From a DSH profile (e.g. the default `web` profile):
 
 ```bash
-dsh plugin --profile web add github:zxbc/dsh-vscode-themes2
+dsh plugin --profile web add dsh-vscode-themes2
 ```
 
 Or from a local clone:
@@ -49,7 +49,7 @@ Or from a local clone:
 dsh plugin install /path/to/dsh-vscode-themes2
 ```
 
-> The package is named `@local/dsh-vscode-themes2` — the trailing `2` is historical
+> The package is named `dsh-vscode-themes2` — the trailing `2` is historical
 > (an early specifier got cached as failed inside a running harness process during
 > development) and is part of the install name; don't "fix" it when typing commands.
 
