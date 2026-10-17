@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/dsh-vscode-themes2',
+  id: 'dsh-vscode-themes2',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
@@ -78,7 +78,7 @@ window.__ModuleLoader__.load({
     // plain JSON. `create()` only needs to return `{ parse }` — the registry does
     // not require a zod instance for hand-written contributions — so we use a
     // pass-through schema and avoid importing zod into the client bundle.
-    const PKG = '@local/dsh-vscode-themes2';
+    const PKG = 'dsh-vscode-themes2';
     const REPO_URL = 'https://github.com/zxbc/dsh-vscode-themes2';
     const PASS_THROUGH = { parse: (v) => v };
     const codec = (typeSymbol) => ({ mode: 'strict', typeSymbol, create: () => PASS_THROUGH });

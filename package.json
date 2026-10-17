@@ -1,8 +1,15 @@
 {
-  "name": "@local/dsh-vscode-themes2",
+  "name": "dsh-vscode-themes2",
   "version": "1.1.0",
+  "description": "Browse, search, install, and apply VS Code color themes to the DeepSeek Harness Web UI — one click re-skins the whole interface live.",
+  "keywords": ["dsh", "deepseek-harness", "plugin", "vscode", "themes", "vscode-themes", "ui", "theme", "skin"],
   "license": "MIT",
-  "private": true,
+  "author": "zxbc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zxbc/dsh-vscode-themes2.git"
+  },
+  "homepage": "https://github.com/zxbc/dsh-vscode-themes2",
   "type": "module",
   "main": "./index.js",
   "exports": {
