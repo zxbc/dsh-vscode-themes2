@@ -1112,12 +1112,14 @@ window.__ModuleLoader__.load({
             );
           }
 
-          // The applied card's ring + glow, in the theme's own accent colour.
-          // Set inline (not via a CSS var) so a weak brand colour can't make the
-          // indicator vanish; the solid 3px ring is always visible.
+          // The applied card's ring + halo + glow, in the theme's own accent
+          // colour. Set inline (not via a CSS var) so a weak brand colour can't
+          // make the indicator vanish: the solid 3px ring is always visible, and
+          // the outer 4px translucent halo (7px total spread) plus the wider
+          // glow make the active card unmistakable at a glance.
           function activeRingStyle(tokens) {
             const brand = (tokens && tokens['--dsw-alias-brand-primary']) || '#4d78cc';
-            return { boxShadow: '0 0 0 3px ' + brand + ', 0 4px 18px ' + withAlpha(brand, 0.35) };
+            return { boxShadow: '0 0 0 3px ' + brand + ', 0 0 0 7px ' + withAlpha(brand, 0.25) + ', 0 6px 24px ' + withAlpha(brand, 0.45) };
           }
 
           // The card's own surface colours, bound inline to the card's theme tokens so
@@ -1156,15 +1158,41 @@ window.__ModuleLoader__.load({
               'button',
               {
                 className: 'vst-remove-btn',
-                title: t('remove'),
-                'aria-label': t('remove'),
+                title: label,
+                'aria-label': label,
                 style: themeButtonVars(tokens),
                 onClick: (e) => {
                   e.stopPropagation();
                   removeTheme(id);
                 },
               },
-              label,
+              trashIcon(),
+            );
+          }
+
+          // Trashcan glyph for the uninstall/remove button: a Lucide-style
+          // trashcan outline drawn in currentColor, so it follows the button's
+          // own colour (label-secondary at rest, the card's error colour on
+          // hover — see the .vst-remove-btn rules).
+          function trashIcon() {
+            return h(
+              'svg',
+              {
+                viewBox: '0 0 24 24',
+                width: 14,
+                height: 14,
+                'aria-hidden': true,
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.8,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+              },
+              h('path', { d: 'M3 6h18' }),
+              h('path', { d: 'M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2' }),
+              h('path', { d: 'M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6' }),
+              h('line', { x1: 10, y1: 11, x2: 10, y2: 17 }),
+              h('line', { x1: 14, y1: 11, x2: 14, y2: 17 }),
             );
           }
 
@@ -1305,11 +1333,15 @@ window.__ModuleLoader__.load({
                   // Button colours resolve the per-card `--vst-tk-*` custom
                   // properties set inline by themeButtonVars() — the card's own
                   // palette, not the applied theme's.
-                  '.vst-remove-btn{font:inherit;font-size:11px;font-weight:500;line-height:1;padding:4px 9px;cursor:pointer;' +
+                  '.vst-remove-btn{display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:11px;font-weight:500;line-height:1;padding:4px 6px;cursor:pointer;' +
                   'color:var(--vst-tk-label2,#9aa4b2);background:transparent;' +
                   'border:1px solid var(--vst-tk-border,#3a3f4b);border-radius:6px;}' +
                   '.vst-remove-btn:hover{color:var(--vst-tk-error,#c24038);border-color:var(--vst-tk-error,#c24038);}' +
+                  // margin-left:auto pins the action button to the bottom-right of
+                  // the card even when the Active pill is absent (space-between
+                  // alone left-aligns a lone child).
                   '.vst-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}' +
+                  '.vst-card-actions .vst-remove-btn,.vst-card-actions .vst-install-btn{margin-left:auto;}' +
                   '.vst-state{font-size:12px;color:var(--dsw-alias-label-secondary);}' +
                   '.vst-state.is-selected{color:var(--dsw-alias-brand-primary);font-weight:600;}' +
                   '.vst-state-error{color:var(--dsw-alias-state-error-primary);}' +

@@ -213,6 +213,50 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-23 (UX: trashcan uninstall icon, bottom-right action buttons,
+  stronger active highlight, install-keeps-market-card verified)** — Four
+  user-requested changes, all in `client.js` only (host half untouched):
+  - **Uninstall button → trashcan icon.** New `trashIcon()` helper (Lucide-style
+    trashcan outline, `currentColor` stroke, 14×14) rendered inside
+    `removeButton()` in place of the "Uninstall"/"Remove" text; the label now
+    serves only as `title`/`aria-label`. The button keeps its
+    `--vst-tk-*` per-card palette vars and the red hover state (the icon
+    inherits `currentColor`).
+  - **Action buttons always bottom-right.** The `.vst-card-actions` row uses
+    `justify-content:space-between`, which left-aligns a LONE child — so on
+    non-active cards the Uninstall/Install button sat at the bottom-LEFT. New
+    rule `.vst-card-actions .vst-remove-btn,.vst-card-actions .vst-install-btn{margin-left:auto;}`
+    pins both buttons to the right edge in every state (with or without the
+    Active pill). The marketplace **Install button keeps its existing text
+    look** (`Install` label, brand background) — only its position changed.
+    The remove button became an icon-sized box (`display:inline-flex`,
+    `padding:4px 6px`).
+  - **Stronger active-theme highlight.** `activeRingStyle` now returns a triple
+    shadow: solid 3px brand ring + 4px translucent halo (`0 0 0 7px` at 25%
+    alpha) + a wider, stronger glow (`0 6px 24px` at 45% alpha), in the theme's
+    own brand colour. The Active pill is unchanged.
+  - **Install keeps the marketplace card (verified, no code change needed).**
+    Confirmed by code inspection: the market grid renders
+    `marketResults.map(marketCard)` with NO `installedIds` filter — installing
+    only (a) adds the theme to the Installed section and (b) swaps that
+    market card's button from Install to the trashcan icon. The card itself is
+    never removed or re-ordered.
+  - **Verified 8/8 with the Playwright E2E** (`/workspace/browser/vst-e2e.cjs`,
+    live server + launch token): A — all 14 local cards show a trashcan SVG
+    with no text; B — every trashcan sits 9px from the card's right/bottom
+    edges (bottom-right); C — all 142 "gruvbox" market cards have the text
+    `Install` button at bottom-right; D — the applied market card's computed
+    box-shadow is `0px 0px 0px 3px` + `0px 0px 0px 7px` + `0px 6px 24px`
+    (ring+halo+glow) with the Active pill; E — after installing "Gruvbox
+    Theme": the market card stays at index 0/142 (not removed/moved), its
+    button becomes the trashcan icon, and the Installed section gains the new
+    card ("Gruvbox Dark Medium" — the theme entry's label, which can differ
+    from the marketplace displayName). Only page error is the known
+    third-party `remote.session without inject`. Screenshots
+    `/tmp/vst-{1-installed,2-market,3-active,4-after-install}.png`.
+  - Live: client-HMR rebuilt the bundle (rev 57a2c799fd6e ships
+    `trashIcon`/`margin-left:auto`/halo). `node --check client.js` clean.
+    Committed locally on `main`; NOT pushed.
 - **2026-10-11 (Hub submission: repo prep, Phase 1)** — User approved the
   dsh-plugin.org submission plan (see untracked `SUBMISSION_PLAN.md`): **MIT**
   license, category **UI & Experience**, commit **all three** screenshots. Executed
