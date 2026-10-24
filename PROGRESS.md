@@ -213,6 +213,23 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-24 (One-time backfill of stale installed themes)** —
+  Themes installed before the displayName/description fields existed lack them,
+  so the Installed section neither shows nor searches their description. Added a
+  one-time client-side backfill (client.js): a `React.useEffect` (gated on
+  `marketAvailable`) that, once per browser profile (flag
+  `dsh.vscodeThemes.backfilled.v1`), loads the installed list, finds entries
+  missing `description` or `displayName`, recovers each one's marketplace
+  extension name from its id via `extNameFromId` (the id is
+  'vscode-<publisher>-<name>', both lowercased; the def stores the publisher but
+  not the bare name), searches the marketplace, and fills in the missing
+  displayName + description from the matching extension (matched by
+  publisher + name), then persists and re-renders. Best-effort: a failed lookup
+  keeps whatever the entry has and the flag is still set. Verified 5/5 with
+  `vst-e2e4.cjs` (install Gruvbox Theme, strip both fields to simulate a stale
+  install, clear the flag, reload, confirm both are restored and the card shows
+  the display name). All suites green: vst-e2e.cjs 8/8, vst-e2e2.cjs 5/5,
+  vst-e2e3.cjs 3/3, vst-e2e4.cjs 5/5. Committed locally on `main`; NOT pushed.
 - **2026-10-24 (Description search parity: Installed matches descriptions like Marketplace)** —
   User noted the marketplace search lands on theme *descriptions* (server-side
   full-text) but the Installed section neither shows nor matches descriptions.

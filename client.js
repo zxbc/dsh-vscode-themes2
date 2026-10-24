@@ -475,6 +475,16 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // Recover the marketplace extension name from an installed theme's id. The
+    // id is 'vscode-<publisher>-<name>' (both lowercased); the def stores the
+    // publisher but not the bare extension name, so it is only recoverable from
+    // the id. Returns '' if the id does not carry the expected prefix.
+    function extNameFromId(th) {
+      const prefix = 'vscode-' + String(th.publisher || '').toLowerCase() + '-';
+      const id = String(th.id || '');
+      return id.startsWith(prefix) ? id.slice(prefix.length) : '';
+    }
+
     // ------------------------------------------------------------------
     // Persistence of themes the user has removed (bundled or installed).
     // Removing a theme filters it out of the list so the user can debloat
@@ -821,6 +831,47 @@ window.__ModuleLoader__.load({
               runSearch(raw);
             }, MARKET_POLL_MS);
             return () => clearInterval(id);
+          }, [marketAvailable]);
+
+          // One-time backfill: themes installed before the displayName/description
+          // fields existed lack them, so the Installed section neither shows nor
+          // searches their description. Look each stale theme up on the marketplace
+          // (by publisher + extension name) and fill in the missing fields, then
+          // persist. Guarded by a flag so it runs once per browser profile; if a
+          // lookup fails the flag is still set (best-effort, never blocks boot).
+          React.useEffect(() => {
+            if (!marketAvailable) return undefined;
+            const FLAG = 'dsh.vscodeThemes.backfilled.v1';
+            let done = false;
+            try { done = !!localStorage.getItem(FLAG); } catch (_) {}
+            if (done) return undefined;
+            let cancelled = false;
+            (async () => {
+              try {
+                const ns = ctx.get('remote.vscodeThemes');
+                if (!ns) return;
+                const list = loadInstalled();
+                const stale = list.filter((th) => !th.description || !th.displayName);
+                for (const th of stale) {
+                  if (cancelled) return;
+                  const extName = extNameFromId(th);
+                  if (!extName) continue;
+                  try {
+                    const res = await ns.search(extName);
+                    if (!res.ok) continue;
+                    const match = (res.value || []).find((e) => e.publisher === th.publisher && String(e.name).toLowerCase() === extName);
+                    if (!match) continue;
+                    th.displayName = th.displayName || match.displayName || th.name;
+                    th.description = th.description || match.description || '';
+                  } catch (_) { /* keep whatever we have */ }
+                }
+                if (cancelled) return;
+                saveInstalled(list);
+                try { localStorage.setItem(FLAG, '1'); } catch (_) {}
+                setInstalledList(loadInstalled());
+              } catch (_) { /* best-effort; retried on next mount */ }
+            })();
+            return () => { cancelled = true; };
           }, [marketAvailable]);
 
           // Eagerly fetch each marketplace result's theme definition in the
