@@ -31,17 +31,20 @@ Web UI — one click re-skins the whole interface live, in that theme's own pale
 
 Real-browser captures of the settings panel. Each card previews its theme live
 (sample text, semantic chips, accent button); the applied card carries the Active
-ring + pill in its own accent colour.
+ring + pill in its own accent colour, and the whole UI is re-skinned in that
+theme's palette.
 
-Searching "cyberpunk" — the installed Cyberpunk theme appears in **Installed**, and
-the Marketplace section lists matching themes with the result-sort dropdown:
+The **Cyberpunk** theme applied — the entire UI re-skinned in its dark neon
+palette — with a "cyberpunk" search returning the installed theme in **Installed**
+and the Marketplace section listing matching themes with the result-sort dropdown:
 
-![Search example: cyberpunk](screenshots/search-cyberpunk.png)
+![Cyberpunk theme applied, search cyberpunk](screenshots/search-cyberpunk.png)
 
-The Claude Theme applied (the whole UI re-skinned in its palette, Active ring + pill)
-with a "claude" search returning the installed theme in **Installed**:
+The dark **Claude Code Theme** applied (the whole UI re-skinned in its palette,
+Active ring + pill) with a "claude" search returning the installed theme in
+**Installed**:
 
-![Applied theme: Claude, search claude](screenshots/active-claude-search.png)
+![Claude Code Theme applied, search claude](screenshots/active-claude-dark-search.png)
 
 ## Install
 
