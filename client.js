@@ -910,6 +910,16 @@ window.__ModuleLoader__.load({
 
           const q = query.trim().toLowerCase();
 
+          // The Marketplace's server-side search matches the FULL description
+          // (and other fields), but we only store the shortDescription locally.
+          // A term that appears only in the full description (e.g. "smart" for
+          // "Dark Green Jungle") therefore never matches the local filter. To get
+          // true parity, cross-reference the current marketplace result set: an
+          // installed theme shows in the Installed section if it is in the
+          // marketplace results for this query (matched by id), even when the
+          // local substring filter does not match.
+          const marketResultIds = new Set(marketResults.map((m) => m.id));
+
           // Effective local list: installed (most recent first) then bundled, with
           // any removed themes filtered out, then filtered by the search query.
           const installedIds = new Set(installedList.map((x) => x.id));
@@ -925,7 +935,9 @@ window.__ModuleLoader__.load({
             // name and the marketplace short description (description), so a
             // search for either must hit the Installed section as well as the
             // Marketplace (whose server-side search also matches descriptions).
-            return !q || th.name.toLowerCase().indexOf(q) !== -1 || (th.displayName || '').toLowerCase().indexOf(q) !== -1 || (th.description || '').toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
+            // `marketResultIds.has(th.id)` adds true parity for terms that only
+            // appear in the marketplace's full description.
+            return !q || th.name.toLowerCase().indexOf(q) !== -1 || (th.displayName || '').toLowerCase().indexOf(q) !== -1 || (th.description || '').toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1 || marketResultIds.has(th.id);
           })
           // Starred themes float to the front; sort is stable, so the
           // installed-then-bundled order is kept within each group.

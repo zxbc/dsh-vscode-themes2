@@ -213,6 +213,25 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-24 (True search parity: cross-reference marketplace results)** —
+  User reported searching "smart" shows "Dark Green Jungle theme" and
+  "Vishwakarma Theme" in the Marketplace (both installed) but NOT in the
+  Installed section. Root cause: the Marketplace's server-side search matches
+  the FULL description (and other fields), but we only store the
+  `shortDescription` locally — and neither theme's shortDescription contains
+  "smart", so the local substring filter can never match it. The backfill
+  (previous session) only helps when the term is in the shortDescription.
+  Fix: cross-reference the current marketplace result set. The installed-list
+  filter now also includes any theme whose id is in `marketResults` (the
+  marketplace results for the active query), so an installed theme shows in the
+  Installed section whenever the Marketplace shows it — true parity, including
+  terms that only appear in the full description. Verified 5/5 with
+  `vst-e2e5.cjs` (install both themes, search "smart", confirm both appear in
+  the Installed section alongside the Marketplace). Other suites green:
+  vst-e2e2.cjs 5/5, vst-e2e3.cjs 3/3, vst-e2e4.cjs 5/5; vst-e2e.cjs is 8/8 on
+  a clean run (its check C is a known flaky entrance-animation measurement that
+  fails on a random single card ~half the time, unrelated to this change).
+  Committed locally on `main`; NOT pushed.
 - **2026-10-24 (One-time backfill of stale installed themes)** —
   Themes installed before the displayName/description fields existed lack them,
   so the Installed section neither shows nor searches their description. Added a
