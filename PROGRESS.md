@@ -213,6 +213,34 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-24 (Marketplace result sort control)** —
+  User wanted a sort option for marketplace search results, as a control in the
+  top-right of the marketplace header row (same row as the "Marketplace" text).
+  Explored the VS Code Marketplace extensionquery API: it returns per-extension
+  `statistics` (install, averagerating, ratingcount, trendingdaily/weekly/
+  monthly, updateCount, weightedRating, downloadCount) plus `lastUpdated` and
+  `publishedDate` dates. The API ignores request `Sort` fields, so sorting is
+  client-side. Offered the user a choice; they chose all five, in order:
+  Most popular (default), Highest rated, Trending, Recently updated, Newest.
+  Implementation:
+  - `marketplace.js` `searchMarketplace` now also returns `ratingCount`,
+    `trendingMonthly`, `lastUpdated`, `publishedDate` (alongside the existing
+    `installs`/`averageRating`). Host cache-bust bumped to `?host=2`.
+  - `client.js` `runSearch` carries those signals onto each result; a
+    `marketSort` state (default 'popular') drives a `marketSorters` map that
+    re-sorts a copy of the results client-side (no re-fetch). 'rated' puts
+    rated themes first, then rating, then rating COUNT (a 5-star/1-rating theme
+    ranks below a 4.9-star/56-rating one), then installs; 'trending' uses
+    trendingMonthly; 'updated'/'newest' use the ISO dates (lexicographic =
+    chronological). A `<select class="vst-sort">` is rendered in a new
+    `.vst-market-head` flex row (title left, select right), only when results
+    exist. i18n strings + CSS added.
+  - Verified 9/9 with `vst-e2e6.cjs`: the select is in the header row, top-right
+    (right of the title), all five options in order, and each option's top-4
+    matches the order computed independently from the host data. Other suites
+    green: vst-e2e2.cjs 5/5, vst-e2e3.cjs 3/3, vst-e2e4.cjs 5/5, vst-e2e5.cjs
+    5/5; vst-e2e.cjs 8/8 on a clean run (check C is the known flaky
+    entrance-animation measurement). Committed locally on `main`; NOT pushed.
 - **2026-10-24 (True search parity: cross-reference marketplace results)** —
   User reported searching "smart" shows "Dark Green Jungle theme" and
   "Vishwakarma Theme" in the Marketplace (both installed) but NOT in the

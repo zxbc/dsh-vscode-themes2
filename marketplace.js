@@ -455,8 +455,18 @@ export async function searchMarketplace(query) {
       displayName: e.displayName,
       version: e.versions && e.versions[0] && e.versions[0].version,
       description: e.shortDescription || '',
+      // Sort-relevant signals the client uses for its sort control. `install`
+      // is all-time installs (the popularity signal); `averagerating`/
+      // `ratingcount` are the star rating and how many users gave it (a 5-star
+      // theme with 1 rating is less trustworthy than a 4.9-star one with 56);
+      // `trendingmonthly` is the Marketplace's monthly trending score; the two
+      // dates drive "recently updated" and "newest".
       installs: stat(e, 'install') ?? 0,
       averageRating: stat(e, 'averagerating') ?? 0,
+      ratingCount: stat(e, 'ratingcount') ?? 0,
+      trendingMonthly: stat(e, 'trendingmonthly') ?? 0,
+      lastUpdated: e.lastUpdated || '',
+      publishedDate: e.publishedDate || '',
     }))
     .filter((e) => e.publisher && e.name && e.version)
     .sort((a, b) => (b.installs - a.installs) || (b.averageRating - a.averageRating) ||
