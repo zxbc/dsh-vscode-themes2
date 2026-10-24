@@ -213,6 +213,36 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-24 (Description search parity: Installed matches descriptions like Marketplace)** —
+  User noted the marketplace search lands on theme *descriptions* (server-side
+  full-text) but the Installed section neither shows nor matches descriptions.
+  Root cause: the installed definition never carried a description —
+  `fetchThemeDefinition` (marketplace.js) returned no `description`, AND the
+  client's `getDef` called `ns.fetchTheme({publisher,name,version})` without
+  forwarding the marketplace `shortDescription`. Three edits:
+  - `marketplace.js` `fetchThemeDefinition` now returns
+    `description: ext.description || ''` (the marketplace short description).
+  - `client.js` `getDef` passes `description: theme.description` to
+    `ns.fetchTheme` (the host's `fetchTheme(ext)` forwards the whole object to
+    `fetchThemeDefinition`; the `Remote` decorator has no strict codec, so the
+    extra field is accepted).
+  - `client.js` local-theme search filter also matches `th.description`, so a
+    search for a description word hits the Installed section just like the
+    Marketplace. The installed card's tooltip now shows the description too.
+  - **Host-reload gotcha (important):** host-side `marketplace.js` does NOT
+    hot-reload (HMR root is only `/workspace/artifact-tracker`), and a
+    `set_plugin` off→on re-runs `index.js` but Node's ESM cache still returns
+    the OLD `marketplace.js` (same import URL). Fix: import it as
+    `./marketplace.js?host=1` — the query busts the cache so a plugin re-enable
+    re-reads the file. Bump the number after each marketplace.js edit. (Verified
+    with a top-level load marker that index.js re-runs on toggle.)
+  - Verified 3/3 with a new Playwright E2E (`/workspace/browser/vst-e2e3.cjs`):
+    install "Palenight Theme" (description "An elegant and juicy
+    material-inspired theme for Visual Studio Code."), confirm the installed
+    card carries that description, then search the description-only word
+    "elegant" and confirm the theme appears in the Installed section. Original
+    suites still green: vst-e2e.cjs 8/8, vst-e2e2.cjs 5/5. Committed locally on
+    `main`; NOT pushed.
 - **2026-10-24 (Unified installed/marketplace naming + dual-section search)** —
   User asked for (1) the naming inconsistency I flagged to be fixed, and (2) the
   search to return matches in BOTH sections. Root cause was one: the installed

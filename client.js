@@ -869,10 +869,12 @@ window.__ModuleLoader__.load({
           ].filter((th) => {
             if (removedIds.has(th.id) || seenIds.has(th.id)) return false;
             seenIds.add(th.id);
-            // Match the display name too: installed themes store the extension
-            // display name (displayName) as their visible name, so a search for
-            // it must hit the Installed section as well as the Marketplace.
-            return !q || th.name.toLowerCase().indexOf(q) !== -1 || (th.displayName || '').toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
+            // Match the display name and the description too: installed themes
+            // store the extension display name (displayName) as their visible
+            // name and the marketplace short description (description), so a
+            // search for either must hit the Installed section as well as the
+            // Marketplace (whose server-side search also matches descriptions).
+            return !q || th.name.toLowerCase().indexOf(q) !== -1 || (th.displayName || '').toLowerCase().indexOf(q) !== -1 || (th.description || '').toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
           })
           // Starred themes float to the front; sort is stable, so the
           // installed-then-bundled order is kept within each group.
@@ -900,6 +902,11 @@ window.__ModuleLoader__.load({
               publisher: theme.publisher,
               name: theme.name,
               version: theme.version,
+              // Pass the marketplace short description through so the host can
+              // attach it to the fetched definition (installed card tooltip +
+              // description search). The host's fetchTheme forwards the whole
+              // object to fetchThemeDefinition.
+              description: theme.description,
             });
             if (!res.ok) throw res.error;
             fetchedCache.current[theme.id] = res.value;

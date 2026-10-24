@@ -505,5 +505,9 @@ export async function fetchThemeDefinition(ext) {
     tokens: { ...mapped.tokens, ...mapTokenColorsToShiki(merged).tokens },
     publisher: ext.publisher,
     version: ext.version,
+    // Carry the marketplace short description so the installed card's tooltip
+    // shows it and the Installed search can match it — consistent with the
+    // marketplace, whose server-side search also matches descriptions.
+    description: ext.description || '',
   };
 }

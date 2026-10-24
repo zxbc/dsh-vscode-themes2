@@ -14,7 +14,11 @@
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { searchMarketplace, fetchThemeDefinition } from "./marketplace.js";
+// The `?host=1` query busts Node's ESM cache so a plugin re-enable (set_plugin
+// off→on) re-reads marketplace.js instead of returning the module cached at
+// first load. Bump the number after editing marketplace.js to force a fresh
+// host load without restarting the DSH server.
+import { searchMarketplace, fetchThemeDefinition } from "./marketplace.js?host=1";
 import { checkUpdate, applyUpdate } from "./update.js";
 
 var __runInitializers = function(thisArg, initializers, value) {
