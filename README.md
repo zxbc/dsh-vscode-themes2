@@ -34,11 +34,12 @@ Real-browser captures of the settings panel. Each card previews its theme live
 ring + pill in its own accent colour, and the whole UI is re-skinned in that
 theme's palette.
 
-The **Cyberpunk** theme applied — the entire UI re-skinned in its dark neon
-palette — with a "cyberpunk" search returning the installed theme in **Installed**
-and the Marketplace section listing matching themes with the result-sort dropdown:
+The **Cyberpunk 2077 rebuild** theme applied — the entire UI re-skinned in its
+dark neon palette — with a "cyberpunk" search returning the installed theme in
+**Installed** and the Marketplace section listing matching themes with the
+result-sort dropdown:
 
-![Cyberpunk theme applied, search cyberpunk](screenshots/search-cyberpunk.png)
+![Cyberpunk 2077 rebuild applied, search cyberpunk](screenshots/search-cyberpunk.png)
 
 The dark **Claude Code Theme** applied (the whole UI re-skinned in its palette,
 Active ring + pill) with a "claude" search returning the installed theme in
