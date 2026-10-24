@@ -3,7 +3,7 @@
 Browse, search, install, and apply VS Code color themes to the DeepSeek Harness (DSH)
 Web UI — one click re-skins the whole interface live, in that theme's own palette.
 
-**Category:** UI & Experience · **License:** MIT · **Works with:** DSH 0.2.1-alpha.1 (web profile)
+**Category:** UI & Experience · **License:** MIT · **Works with:** DSH 0.2.1-alpha.5 (web profile)
 
 ## What it does
 
@@ -29,18 +29,34 @@ Web UI — one click re-skins the whole interface live, in that theme's own pale
 
 ## Screenshots
 
-The panel in a real browser, with marketplace themes installed (30 installed above).
-Each card previews its theme live (sample text, semantic chips, accent button); the
-applied card carries the Active ring + pill in its own accent colour:
+Real-browser captures of the settings panel. Each card previews its theme live
+(sample text, semantic chips, accent button); the applied card carries the Active
+ring + pill in its own accent colour.
 
-![Theme gallery](screenshots/theme-gallery.png)
+Searching "cyberpunk" — the installed Cyberpunk theme appears in **Installed**, and
+the Marketplace section lists matching themes with the result-sort dropdown:
+
+![Search example: cyberpunk](screenshots/search-cyberpunk.png)
+
+The Claude Theme applied (the whole UI re-skinned in its palette, Active ring + pill)
+with a "claude" search returning the installed theme in **Installed**:
+
+![Applied theme: Claude, search claude](screenshots/active-claude-search.png)
 
 ## Install
 
-From a DSH profile (e.g. the default `web` profile):
+The plugin is published to **npm** as `dsh-vscode-themes2`.
+
+From a DSH profile (e.g. the default `web` profile) — this pulls the package from npm:
 
 ```bash
 dsh plugin --profile web add dsh-vscode-themes2
+```
+
+Or install the npm package directly:
+
+```bash
+npm install -g dsh-vscode-themes2
 ```
 
 Or from a local clone:
@@ -87,7 +103,8 @@ protocol facts and edge cases.
 
 ## Compatibility
 
-- **DSH 0.2.1-alpha.1**, web profile (the client half is injected into the Web UI).
+- **DSH 0.2.1-alpha.5**, web profile — tested and compatible (the client half is
+  injected into the Web UI).
 - **Host half: Node 18+** (uses `DecompressionStream` to unzip `.vsix` files).
 - Known limitation: marketplace themes without a parseable
   `editor.background` / `editor.foreground` are skipped with a visible error message.
@@ -108,7 +125,7 @@ It is agent-maintained — read it before changing `client.js` or `marketplace.j
 | `cordis.patch.yml` | Inserts the `vscode-themes2` entry into the profile tree. |
 | `locale/en.json` | Display title/description for the Plugin Manager. |
 | `icon.svg` | Plugin icon. |
-| `screenshots/` | Gallery screenshot embedded in this README. |
+| `screenshots/` | Real-browser captures embedded in this README. |
 | `PROGRESS.md` | Development log & session notes. |
 
 ## License
