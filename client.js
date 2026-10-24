@@ -869,7 +869,10 @@ window.__ModuleLoader__.load({
           ].filter((th) => {
             if (removedIds.has(th.id) || seenIds.has(th.id)) return false;
             seenIds.add(th.id);
-            return !q || th.name.toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
+            // Match the display name too: installed themes store the extension
+            // display name (displayName) as their visible name, so a search for
+            // it must hit the Installed section as well as the Marketplace.
+            return !q || th.name.toLowerCase().indexOf(q) !== -1 || (th.displayName || '').toLowerCase().indexOf(q) !== -1 || th.id.toLowerCase().indexOf(q) !== -1;
           })
           // Starred themes float to the front; sort is stable, so the
           // installed-then-bundled order is kept within each group.
@@ -939,7 +942,11 @@ window.__ModuleLoader__.load({
             try {
               const def = await getDef(theme);
               const list = installedList.filter((x) => x.id !== def.id);
-              list.unshift({ ...def, installedAt: Date.now() });
+              // Keep the installed card's name identical to the marketplace
+              // card's (the extension display name) so both sections show the
+              // same name and a search for it matches in both. `def.name` is
+              // the theme entry's label, which can differ from the display name.
+              list.unshift({ ...def, displayName: theme.displayName || theme.name, installedAt: Date.now() });
               saveInstalled(list);
               registerTheme(def);
               setInstalledList(list);
@@ -1226,14 +1233,14 @@ window.__ModuleLoader__.load({
                 className: 'vst-card' + (isSelected ? ' selected' : ''),
                 role: 'button',
                 'aria-pressed': isSelected,
-                title: (theme.name || theme.displayName) + (theme.description ? '\n' + theme.description : ''),
+                title: (theme.displayName || theme.name) + (theme.description ? '\n' + theme.description : ''),
                 onClick: () => selectTheme(theme.id),
                 style: cardSurfaceStyle(tk, isSelected),
               },
               h(
                 'div',
                 { className: 'vst-card-top' },
-                h('span', { className: 'vst-name', style: { color: tk['--dsw-alias-label-primary'] } }, theme.name || theme.displayName),
+                h('span', { className: 'vst-name', style: { color: tk['--dsw-alias-label-primary'] } }, theme.displayName || theme.name),
                 h(
                   'button',
                   {
