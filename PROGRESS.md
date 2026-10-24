@@ -213,6 +213,27 @@ In `client.js`: constants `MARKET_POLL_MS = 1000`, `MARKET_MIN_QUERY_LEN = 2`.
 
 ## Session log
 
+- **2026-10-24 (Unified installed/marketplace naming + dual-section search)** —
+  User asked for (1) the naming inconsistency I flagged to be fixed, and (2) the
+  search to return matches in BOTH sections. Root cause was one: the installed
+  card showed the theme entry's *label* (`def.name`, e.g. "Gruvbox Dark
+  Medium") while the marketplace card shows the extension's *display name*
+  ("Gruvbox Theme"), so a search for the display name never matched the
+  Installed section (the local filter only checked `name`/`id`). Three surgical
+  edits in `client.js`:
+  - `installTheme` now stores `displayName: theme.displayName || theme.name` on
+    the installed entry (the exact name the marketplace card renders).
+  - `card()` renders `theme.displayName || theme.name` (name span + tooltip),
+    so the installed card shows the same name as its marketplace card.
+  - The local-theme search filter also matches `th.displayName`.
+  Both sections are driven by the same input, so a search now returns the theme
+  in Installed AND Marketplace simultaneously. Verified 5/5 with a second
+  Playwright E2E (`/workspace/browser/vst-e2e2.cjs`): marketplace search by
+  display name finds "Gruvbox Theme"; after installing it, the Installed
+  section shows a card named exactly "Gruvbox Theme" (not the label), the
+  marketplace card remains with its trashcan button, and both names are
+  identical. Screenshot `/tmp/vst-5-unified-name.png`. Committed locally on
+  `main`; NOT pushed.
 - **2026-10-23 (UX: trashcan uninstall icon, bottom-right action buttons,
   stronger active highlight, install-keeps-market-card verified)** — Four
   user-requested changes, all in `client.js` only (host half untouched):
