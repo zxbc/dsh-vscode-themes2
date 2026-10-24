@@ -576,6 +576,12 @@ window.__ModuleLoader__.load({
           'scheme.light': 'light',
           'installed.section': 'Installed',
           'market.section': 'Marketplace',
+          'market.sort.label': 'Sort marketplace results',
+          'market.sort.popular': 'Most popular',
+          'market.sort.rated': 'Highest rated',
+          'market.sort.trending': 'Trending',
+          'market.sort.updated': 'Recently updated',
+          'market.sort.newest': 'Newest',
           'market.empty': 'Search to discover themes from the VS Code Marketplace.',
           'market.busy': 'Searching…',
           'market.mountError': 'Marketplace search is unavailable right now.',
@@ -731,6 +737,9 @@ window.__ModuleLoader__.load({
           // Marketplace state (only active when the Remote mount succeeded).
           const [marketQuery, setMarketQuery] = React.useState('');
           const [marketResults, setMarketResults] = React.useState([]);
+          // Marketplace result sort option. 'popular' is the default (the order
+          // the host already returns: installs desc → rating desc → name asc).
+          const [marketSort, setMarketSort] = React.useState('popular');
           const [marketBusy, setMarketBusy] = React.useState(false);
           const [marketError, setMarketError] = React.useState(marketMountError);
           const [marketShort, setMarketShort] = React.useState(false);
@@ -789,6 +798,14 @@ window.__ModuleLoader__.load({
                 displayName: e.displayName,
                 version: e.version,
                 description: e.description,
+                // Sort-relevant signals, carried through so the client can re-sort
+                // the result set for the selected sort option without re-fetching.
+                installs: e.installs || 0,
+                averageRating: e.averageRating || 0,
+                ratingCount: e.ratingCount || 0,
+                trendingMonthly: e.trendingMonthly || 0,
+                lastUpdated: e.lastUpdated || '',
+                publishedDate: e.publishedDate || '',
               }));
               setMarketResults(themes);
             } catch (err) {
@@ -918,7 +935,27 @@ window.__ModuleLoader__.load({
           // installed theme shows in the Installed section if it is in the
           // marketplace results for this query (matched by id), even when the
           // local substring filter does not match.
-          const marketResultIds = new Set(marketResults.map((m) => m.id));
+          // Re-sort the marketplace result set for the selected option. The host
+          // already returns "most popular" order (installs desc → rating desc →
+          // name asc), so 'popular' keeps that; the others re-order client-side
+          // using the signals carried on each result. Sorts are stable and a
+          // display-name tiebreak keeps the output deterministic.
+          const byName = (a, b) => (a.displayName || '').localeCompare(b.displayName || '');
+          const marketSorters = {
+            popular: (a, b) => (b.installs - a.installs) || (b.averageRating - a.averageRating) || byName(a, b),
+            rated: (a, b) =>
+              // Rated themes first (an unrated theme has averageRating 0), then
+              // by rating, then by how many ratings back it up (a 5-star/1-rating
+              // theme ranks below a 4.9-star/56-rating one), then installs.
+              (Number(b.averageRating > 0) - Number(a.averageRating > 0)) ||
+              (b.averageRating - a.averageRating) || (b.ratingCount - a.ratingCount) ||
+              (b.installs - a.installs) || byName(a, b),
+            trending: (a, b) => (b.trendingMonthly - a.trendingMonthly) || (b.installs - a.installs) || byName(a, b),
+            updated: (a, b) => (b.lastUpdated || '').localeCompare(a.lastUpdated || '') || (b.installs - a.installs) || byName(a, b),
+            newest: (a, b) => (b.publishedDate || '').localeCompare(a.publishedDate || '') || (b.installs - a.installs) || byName(a, b),
+          };
+          const sortedMarketResults = marketResults.slice().sort(marketSorters[marketSort] || marketSorters.popular);
+          const marketResultIds = new Set(sortedMarketResults.map((m) => m.id));
 
           // Effective local list: installed (most recent first) then bundled, with
           // any removed themes filtered out, then filtered by the search query.
@@ -1372,6 +1409,11 @@ window.__ModuleLoader__.load({
                   'color:var(--dsw-alias-label-secondary);}' +
                   '.vst-market{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:16px;}' +
                   '.vst-market-body{display:flex;flex-direction:column;gap:10px;}' +
+                  '.vst-market-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}' +
+                  '.vst-sort{margin:0;font-size:12px;font-weight:500;color:var(--dsw-alias-label-primary);' +
+                  'background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);' +
+                  'border-radius:6px;padding:4px 8px;cursor:pointer;outline:none;max-width:180px;}' +
+                  '.vst-sort:focus{border-color:var(--dsw-alias-brand-primary);}' +
                   '.vst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}' +
                   '.vst-card{display:flex;flex-direction:column;gap:6px;padding:8px;text-align:left;' +
                   'background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:9px;' +
@@ -1496,7 +1538,27 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'vst-market' },
-              h('h3', { className: 'vst-section-title' }, t('market.section')),
+              h(
+                'div',
+                { className: 'vst-market-head' },
+                h('h3', { className: 'vst-section-title' }, t('market.section')),
+                marketAvailable && marketResults.length
+                  ? h(
+                      'select',
+                      {
+                        className: 'vst-sort',
+                        value: marketSort,
+                        onChange: (e) => setMarketSort(e.target.value),
+                        'aria-label': t('market.sort.label'),
+                      },
+                      h('option', { value: 'popular' }, t('market.sort.popular')),
+                      h('option', { value: 'rated' }, t('market.sort.rated')),
+                      h('option', { value: 'trending' }, t('market.sort.trending')),
+                      h('option', { value: 'updated' }, t('market.sort.updated')),
+                      h('option', { value: 'newest' }, t('market.sort.newest')),
+                    )
+                  : null,
+              ),
               marketAvailable
                 ? h(
                     'div',
@@ -1510,7 +1572,7 @@ window.__ModuleLoader__.load({
                     !marketBusy && !marketShort && !marketError && !!marketQuery && marketResults.length === 0
                       ? h('div', { className: 'vst-empty' }, t('no.results'))
                       : null,
-                    marketResults.length ? h('div', { className: 'vst-grid' }, marketResults.map((theme) => marketCard(theme))) : null,
+                    sortedMarketResults.length ? h('div', { className: 'vst-grid' }, sortedMarketResults.map((theme) => marketCard(theme))) : null,
                   )
                 : h('div', { className: 'vst-error' }, t('market.mountError')),
             ),
